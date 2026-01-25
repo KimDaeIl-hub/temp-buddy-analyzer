@@ -10,20 +10,20 @@ import { TemperatureChart } from "@/components/TemperatureChart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Thermometer, Upload, RefreshCw, Settings, Database, BarChart3, TrendingUp } from "lucide-react";
+import { Thermometer, RefreshCw, Settings, Database, BarChart3, TrendingUp } from "lucide-react";
 
 const Index = () => {
   const [loggers, setLoggers] = useState<DataLogger[]>([]);
   const [sessions, setSessions] = useState<MeasurementSession[]>([]);
   const [fileName, setFileName] = useState<string>("");
-  const [activeTab, setActiveTab] = useState("config");
+  const [activeTab, setActiveTab] = useState("chart");
 
   const handleFileLoad = useCallback((content: string, name: string) => {
     const parsedLoggers = parseCSVContent(content);
     setLoggers(parsedLoggers);
     setSessions([]);
     setFileName(name);
-    setActiveTab("config");
+    setActiveTab("chart");
   }, []);
 
   const handleUpdateLogger = useCallback((loggerId: string, updates: Partial<DataLogger>) => {
@@ -36,11 +36,8 @@ const Index = () => {
     setLoggers([]);
     setSessions([]);
     setFileName("");
-    setActiveTab("config");
+    setActiveTab("chart");
   }, []);
-
-  const allRecords = loggers.flatMap(l => l.records);
-  const hasConfiguredLoggers = loggers.some(l => l.type !== null);
 
   return (
     <div className="min-h-screen bg-background">
@@ -60,7 +57,7 @@ const Index = () => {
           {fileName && (
             <div className="flex items-center gap-3">
               <Badge variant="secondary" className="hidden sm:flex">
-                {fileName}
+                {fileName} ({loggers.length}개 로거)
               </Badge>
               <Button variant="outline" size="sm" onClick={handleReset}>
                 <RefreshCw className="w-4 h-4 mr-2" />
@@ -88,81 +85,81 @@ const Index = () => {
             <div className="grid gap-4 md:grid-cols-3 mt-8">
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-chart-1/20 w-fit mx-auto mb-3">
-                  <Settings className="w-5 h-5 text-chart-1" />
+                  <TrendingUp className="w-5 h-5 text-chart-1" />
                 </div>
-                <h3 className="font-medium mb-1">데이터로거 설정</h3>
-                <p className="text-sm text-muted-foreground">열수/품온 측정 유형 구분</p>
+                <h3 className="font-medium mb-1">다중 로거 지원</h3>
+                <p className="text-sm text-muted-foreground">4개 로거 동시 분석</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-chart-2/20 w-fit mx-auto mb-3">
                   <BarChart3 className="w-5 h-5 text-chart-2" />
                 </div>
-                <h3 className="font-medium mb-1">자동 계산</h3>
-                <p className="text-sm text-muted-foreground">평균 온도, F Value 분석</p>
+                <h3 className="font-medium mb-1">그래프 회차 분할</h3>
+                <p className="text-sm text-muted-foreground">직관적 구간 선택</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-primary/20 w-fit mx-auto mb-3">
-                  <TrendingUp className="w-5 h-5 text-primary" />
+                  <Settings className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">시각화</h3>
-                <p className="text-sm text-muted-foreground">그래프 및 테이블 제공</p>
+                <h3 className="font-medium mb-1">개별 설정</h3>
+                <p className="text-sm text-muted-foreground">로거별 열수/품온 지정</p>
               </div>
             </div>
           </div>
         ) : (
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
-              <TabsTrigger value="config" className="gap-2">
-                <Settings className="w-4 h-4" />
-                <span className="hidden sm:inline">설정</span>
-              </TabsTrigger>
-              <TabsTrigger value="data" className="gap-2">
-                <Database className="w-4 h-4" />
-                <span className="hidden sm:inline">원본 데이터</span>
-              </TabsTrigger>
-              <TabsTrigger value="summary" className="gap-2">
-                <BarChart3 className="w-4 h-4" />
-                <span className="hidden sm:inline">분석 결과</span>
-              </TabsTrigger>
-              <TabsTrigger value="chart" className="gap-2">
-                <TrendingUp className="w-4 h-4" />
-                <span className="hidden sm:inline">그래프</span>
-              </TabsTrigger>
-            </TabsList>
+          <div className="grid gap-6 lg:grid-cols-4">
+            <div className="lg:col-span-3">
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+                <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+                  <TabsTrigger value="chart" className="gap-2">
+                    <TrendingUp className="w-4 h-4" />
+                    <span className="hidden sm:inline">그래프</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="config" className="gap-2">
+                    <Settings className="w-4 h-4" />
+                    <span className="hidden sm:inline">설정</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="data" className="gap-2">
+                    <Database className="w-4 h-4" />
+                    <span className="hidden sm:inline">데이터</span>
+                  </TabsTrigger>
+                  <TabsTrigger value="summary" className="gap-2">
+                    <BarChart3 className="w-4 h-4" />
+                    <span className="hidden sm:inline">결과</span>
+                  </TabsTrigger>
+                </TabsList>
 
-            <TabsContent value="config" className="space-y-6">
-              <div className="grid gap-6 lg:grid-cols-3">
-                <div className="lg:col-span-2">
-                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <Thermometer className="w-5 h-5 text-primary" />
-                    데이터로거 설정
-                  </h2>
-                  <LoggerConfig loggers={loggers} onUpdateLogger={handleUpdateLogger} />
-                </div>
-                <div>
-                  <SessionManager 
-                    records={allRecords}
+                <TabsContent value="chart">
+                  <TemperatureChart 
+                    loggers={loggers} 
                     sessions={sessions}
                     onSessionsChange={setSessions}
                   />
-                </div>
-              </div>
-            </TabsContent>
+                </TabsContent>
 
-            <TabsContent value="data">
-              <DataTable loggers={loggers} sessions={sessions} />
-            </TabsContent>
+                <TabsContent value="config">
+                  <LoggerConfig loggers={loggers} onUpdateLogger={handleUpdateLogger} />
+                </TabsContent>
 
-            <TabsContent value="summary">
-              <ResultsSummary loggers={loggers} sessions={sessions} />
-            </TabsContent>
+                <TabsContent value="data">
+                  <DataTable loggers={loggers} sessions={sessions} />
+                </TabsContent>
 
-            <TabsContent value="chart">
-              <TemperatureChart loggers={loggers} sessions={sessions} />
-            </TabsContent>
-          </Tabs>
+                <TabsContent value="summary">
+                  <ResultsSummary loggers={loggers} sessions={sessions} />
+                </TabsContent>
+              </Tabs>
+            </div>
+            
+            <div className="lg:col-span-1">
+              <SessionManager 
+                sessions={sessions}
+                onSessionsChange={setSessions}
+              />
+            </div>
+          </div>
         )}
       </main>
     </div>

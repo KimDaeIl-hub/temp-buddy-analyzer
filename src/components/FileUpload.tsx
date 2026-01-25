@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { Upload, FileText } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { readFileWithEncoding } from "@/utils/csvParser";
 
 interface FileUploadProps {
   onFileLoad: (content: string, fileName: string) => void;
@@ -8,32 +9,24 @@ interface FileUploadProps {
 
 export function FileUpload({ onFileLoad }: FileUploadProps) {
   const handleFileChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        onFileLoad(content, file.name);
-      };
-      reader.readAsText(file, 'utf-8');
+      const content = await readFileWithEncoding(file);
+      onFileLoad(content, file.name);
     },
     [onFileLoad]
   );
 
   const handleDrop = useCallback(
-    (event: React.DragEvent<HTMLElement>) => {
+    async (event: React.DragEvent<HTMLElement>) => {
       event.preventDefault();
       const file = event.dataTransfer.files?.[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        onFileLoad(content, file.name);
-      };
-      reader.readAsText(file, 'utf-8');
+      const content = await readFileWithEncoding(file);
+      onFileLoad(content, file.name);
     },
     [onFileLoad]
   );

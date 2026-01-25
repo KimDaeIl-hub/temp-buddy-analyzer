@@ -58,8 +58,8 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
     return '';
   };
 
-  const getSessionForRecord = (recordIndex: number): MeasurementSession | undefined => {
-    return sessions.find(s => recordIndex >= s.startIndex && recordIndex <= s.endIndex);
+  const getSessionForRecord = (timestamp: Date): MeasurementSession | undefined => {
+    return sessions.find(s => timestamp >= s.startTime && timestamp <= s.endTime);
   };
 
   if (!selectedLogger || selectedLogger.records.length === 0) {
@@ -82,14 +82,14 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
           </CardTitle>
           
           {loggers.length > 1 && (
-            <Select value={selectedLoggerId} onValueChange={setSelectedLoggerId}>
-              <SelectTrigger className="w-[200px]">
+            <Select value={selectedLoggerId} onValueChange={(v) => { setSelectedLoggerId(v); setCurrentPage(1); }}>
+              <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="데이터로거 선택" />
               </SelectTrigger>
               <SelectContent>
                 {loggers.map((logger) => (
                   <SelectItem key={logger.id} value={logger.id}>
-                    {logger.name.length > 25 ? `${logger.name.substring(0, 25)}...` : logger.name}
+                    {logger.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -140,7 +140,7 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
             </TableHeader>
             <TableBody>
               {paginatedRecords.map((record) => {
-                const session = getSessionForRecord(record.index);
+                const session = getSessionForRecord(record.timestamp);
                 return (
                   <TableRow 
                     key={record.index}
