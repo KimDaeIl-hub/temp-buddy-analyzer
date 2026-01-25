@@ -10,34 +10,38 @@ export function parseCSVContent(content: string): DataLogger[] {
   const headerLine = lines[0];
   const headers = headerLine.split(';');
   
-  // Find all temperature columns (pattern: pv######(File #) # - Temperature)
-  const loggerColumns: { index: number; name: string }[] = [];
+  // Find all temperature columns (pattern: pv######)
+  const loggerColumns: { index: number; name: string; hasFValue: boolean }[] = [];
   
   headers.forEach((header, index) => {
+    // Clean header from encoding issues
+    const cleanHeader = header.replace(/[^\x20-\x7E가-힣]/g, '').trim();
+    
     // Match patterns like "pv144556(File 1) 1- Temperature" or similar
-    const match = header.match(/pv\d+\(File\s*\d+\)\s*\d+\s*[-–]\s*Temperature/i);
-    if (match) {
-      loggerColumns.push({ index, name: header.replace(/[^\x20-\x7E]/g, '').trim() });
-    }
-    // Also check for standalone temperature columns
-    if (header.toLowerCase().includes('temperature') && !loggerColumns.some(l => l.index === index)) {
-      const cleanName = header.replace(/[^\x20-\x7E]/g, '').trim();
-      if (cleanName) {
-        loggerColumns.push({ index, name: cleanName });
-      }
+    const pvMatch = cleanHeader.match(/pv\d+/i);
+    if (pvMatch || cleanHeader.toLowerCase().includes('temperature')) {
+      // Check if next column might be F-value for this logger
+      const nextHeader = headers[index + 1]?.replace(/[^\x20-\x7E가-힣]/g, '').trim().toLowerCase();
+      const hasFValue = nextHeader?.includes('f') || nextHeader?.includes('value') || false;
+      
+      loggerColumns.push({ 
+        index, 
+        name: pvMatch ? pvMatch[0] : `Logger ${loggerColumns.length + 1}`,
+        hasFValue
+      });
     }
   });
 
   // If no specific logger columns found, assume single logger with columns: date, time, temp, [fvalue]
-  if (loggerColumns.length === 0) {
-    loggerColumns.push({ index: 2, name: 'Logger 1' });
+  if (loggerColumns.length === 0 && headers.length >= 3) {
+    loggerColumns.push({ index: 2, name: 'Logger 1', hasFValue: headers.length >= 4 });
   }
 
   // Initialize loggers
   loggerColumns.forEach((col, idx) => {
     loggers.push({
       id: `logger-${idx + 1}`,
-      name: col.name || `Logger ${idx + 1}`,
+      name: col.name,
       type: null,
       records: [],
     });
@@ -84,9 +88,11 @@ export function parseCSVContent(content: string): DataLogger[] {
       if (!isNaN(temperature)) {
         // Check if there's an F-value column (usually next column)
         let fValue: number | undefined;
-        const fValueStr = values[col.index + 1]?.trim().replace(',', '.');
-        if (fValueStr && !isNaN(parseFloat(fValueStr))) {
-          fValue = parseFloat(fValueStr);
+        if (col.hasFValue) {
+          const fValueStr = values[col.index + 1]?.trim().replace(',', '.');
+          if (fValueStr && !isNaN(parseFloat(fValueStr))) {
+            fValue = parseFloat(fValueStr);
+          }
         }
         
         loggers[loggerIdx].records.push({
@@ -123,4 +129,37 @@ export function formatDateTime(date: Date): string {
     second: '2-digit',
     hour12: false
   });
+}
+
+// Try multiple encodings for file reading
+export async function readFileWithEncoding(file: File): Promise<string> {
+  // Try UTF-8 first
+  try {
+    const utf8Content = await file.text();
+    // Check if content looks valid (has readable characters)
+    if (utf8Content.includes('pv') || utf8Content.includes('Temperature')) {
+      return utf8Content;
+    }
+  } catch (e) {
+    // Continue to try other encodings
+  }
+  
+  // Try with different encodings using TextDecoder
+  const encodings = ['euc-kr', 'cp949', 'iso-8859-1', 'windows-1252'];
+  const buffer = await file.arrayBuffer();
+  
+  for (const encoding of encodings) {
+    try {
+      const decoder = new TextDecoder(encoding);
+      const content = decoder.decode(buffer);
+      if (content.includes('pv') || content.includes('Temperature') || content.includes('temperature')) {
+        return content;
+      }
+    } catch (e) {
+      // Continue to next encoding
+    }
+  }
+  
+  // Fallback to UTF-8
+  return await file.text();
 }

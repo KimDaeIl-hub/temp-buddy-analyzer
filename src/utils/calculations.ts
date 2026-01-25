@@ -93,6 +93,15 @@ export function calculateProductResults(
   };
 }
 
+export function getRecordsInSession(
+  records: TemperatureRecord[],
+  session: MeasurementSession
+): TemperatureRecord[] {
+  return records.filter(
+    r => r.timestamp >= session.startTime && r.timestamp <= session.endTime
+  );
+}
+
 export function calculateSessionResults(
   logger: DataLogger,
   sessions: MeasurementSession[]
@@ -100,9 +109,7 @@ export function calculateSessionResults(
   const results: CalculationResult[] = [];
   
   sessions.forEach((session) => {
-    const sessionRecords = logger.records.filter(
-      r => r.index >= session.startIndex && r.index <= session.endIndex
-    );
+    const sessionRecords = getRecordsInSession(logger.records, session);
     
     if (sessionRecords.length === 0) return;
     
@@ -146,20 +153,4 @@ export function calculateSessionResults(
   });
   
   return results;
-}
-
-export function getRecordsBySession(
-  records: TemperatureRecord[],
-  sessions: MeasurementSession[]
-): Map<number, TemperatureRecord[]> {
-  const sessionMap = new Map<number, TemperatureRecord[]>();
-  
-  sessions.forEach(session => {
-    const sessionRecords = records.filter(
-      r => r.index >= session.startIndex && r.index <= session.endIndex
-    );
-    sessionMap.set(session.id, sessionRecords);
-  });
-  
-  return sessionMap;
 }

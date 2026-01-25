@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { DataLogger, MeasurementSession, CalculationResult } from "@/types/temperature";
-import { calculateSessionResults } from "@/utils/calculations";
+import { calculateSessionResults, getRecordsInSession } from "@/utils/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -31,7 +31,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
     return (
       <Card className="bg-card">
         <CardContent className="py-8 text-center text-muted-foreground">
-          데이터로거 유형을 설정하고 측정 회차를 추가하세요
+          데이터로거 유형을 설정하세요 (설정 탭에서 열수/품온 선택)
         </CardContent>
       </Card>
     );
@@ -41,7 +41,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
     return (
       <Card className="bg-card">
         <CardContent className="py-8 text-center text-muted-foreground">
-          측정 회차를 추가하여 분석을 시작하세요
+          그래프에서 "회차 분할" 버튼을 클릭하여 측정 회차를 추가하세요
         </CardContent>
       </Card>
     );
@@ -58,8 +58,8 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                 <BarChart3 className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">총 분석 결과</p>
-                <p className="text-2xl font-bold">{results.length}</p>
+                <p className="text-sm text-muted-foreground">총 데이터로거</p>
+                <p className="text-2xl font-bold">{loggers.length}</p>
               </div>
             </div>
           </CardContent>
@@ -74,7 +74,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               <div>
                 <p className="text-sm text-muted-foreground">열수 측정</p>
                 <p className="text-2xl font-bold">
-                  {results.filter(r => r.loggerType === 'hotwater').length}
+                  {configuredLoggers.filter(l => l.type === 'hotwater').length}
                 </p>
               </div>
             </div>
@@ -90,7 +90,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               <div>
                 <p className="text-sm text-muted-foreground">품온 측정</p>
                 <p className="text-2xl font-bold">
-                  {results.filter(r => r.loggerType === 'product').length}
+                  {configuredLoggers.filter(l => l.type === 'product').length}
                 </p>
               </div>
             </div>
@@ -139,11 +139,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                   .map((result, idx) => (
                     <TableRow key={`hotwater-${idx}`}>
                       <TableCell className="font-medium">
-                        <span className="truncate block max-w-[150px]" title={result.loggerName}>
-                          {result.loggerName.length > 20 
-                            ? `${result.loggerName.substring(0, 20)}...` 
-                            : result.loggerName}
-                        </span>
+                        {result.loggerName}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{result.sessionName}</Badge>
@@ -196,11 +192,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                   .map((result, idx) => (
                     <TableRow key={`product-${idx}`}>
                       <TableCell className="font-medium">
-                        <span className="truncate block max-w-[150px]" title={result.loggerName}>
-                          {result.loggerName.length > 20 
-                            ? `${result.loggerName.substring(0, 20)}...` 
-                            : result.loggerName}
-                        </span>
+                        {result.loggerName}
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline">{result.sessionName}</Badge>

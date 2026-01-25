@@ -14,15 +14,14 @@ export interface DataLogger {
   records: TemperatureRecord[];
   setTemperature?: number;
   sterilizationType?: 'pasteurization' | 'sterilization';
+  color?: string;
 }
 
 export interface MeasurementSession {
   id: number;
   name: string;
-  startIndex: number;
-  endIndex: number;
-  startTime: string;
-  endTime: string;
+  startTime: Date;
+  endTime: Date;
 }
 
 export interface CalculationResult {
