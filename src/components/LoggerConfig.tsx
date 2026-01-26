@@ -45,7 +45,7 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
                     {logger.name.length > 25 ? `${logger.name.substring(0, 25)}...` : logger.name}
                   </span>
                   <Badge variant="outline" className="text-xs">
-                    {logger.records.length.toLocaleString()}개
+                    {logger.type === 'hotwater' ? '열수' : logger.type === 'product' ? '품온' : '미설정'}
                   </Badge>
                 </div>
                 

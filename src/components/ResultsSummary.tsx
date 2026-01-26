@@ -130,7 +130,6 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                   <TableHead className="text-right">기준 온도</TableHead>
                   <TableHead className="text-right">평균 온도</TableHead>
                   <TableHead className="text-right">유지 시간</TableHead>
-                  <TableHead className="text-right">레코드 수</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -152,9 +151,6 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                       </TableCell>
                       <TableCell className="text-right font-mono">
                         {result.durationMinutes.toFixed(1)}분
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {result.recordCount.toLocaleString()}
                       </TableCell>
                     </TableRow>
                   ))}

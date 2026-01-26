@@ -479,17 +479,17 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
       <DialogTrigger asChild>
         <Button className="gap-2" disabled={!isReady}>
           <FileDown className="w-4 h-4" />
-          PDF Report
+          PDF 리포트
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" />
-            Generate PDF Report
+            PDF 리포트 생성
           </DialogTitle>
           <DialogDescription>
-            Export analysis results as a PDF report
+            분석 결과를 PDF 리포트로 내보냅니다 (PDF 내용은 호환성을 위해 영문으로 표시됩니다)
           </DialogDescription>
         </DialogHeader>
 
@@ -499,15 +499,15 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Settings2 className="w-4 h-4" />
-                Report Settings
+                리포트 설정
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="productName">Product Name</Label>
+                <Label htmlFor="productName">제품명</Label>
                 <Input
                   id="productName"
-                  placeholder="e.g., Batch A"
+                  placeholder="예: 제품 A"
                   value={settings.productName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, productName: e.target.value }))
@@ -515,10 +515,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="operatorName">Operator</Label>
+                <Label htmlFor="operatorName">작업자</Label>
                 <Input
                   id="operatorName"
-                  placeholder="e.g., John Doe"
+                  placeholder="예: 홍길동"
                   value={settings.operatorName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, operatorName: e.target.value }))
@@ -526,10 +526,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="facilityName">Facility</Label>
+                <Label htmlFor="facilityName">시설명</Label>
                 <Input
                   id="facilityName"
-                  placeholder="e.g., Processing Plant A"
+                  placeholder="예: A 공장"
                   value={settings.facilityName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, facilityName: e.target.value }))
@@ -537,10 +537,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="notes">Verification Notes</Label>
+                <Label htmlFor="notes">검증 메모</Label>
                 <Textarea
                   id="notes"
-                  placeholder="Additional notes..."
+                  placeholder="추가 메모..."
                   rows={3}
                   value={settings.validationNotes}
                   onChange={(e) =>
@@ -556,15 +556,15 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <CheckCircle2 className="w-4 h-4 text-primary" />
-                Report Preview
+                리포트 미리보기
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="p-4 rounded-lg bg-muted/50 border">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-xs text-muted-foreground">ISSUE DATE</div>
+                  <div className="text-xs text-muted-foreground">발행일</div>
                   <div className="text-sm font-medium">
-                    {new Date().toLocaleDateString("en-US")}
+                    {new Date().toLocaleDateString("ko-KR")}
                   </div>
                 </div>
                 <div className="text-lg font-bold text-primary mb-2">
@@ -572,36 +572,36 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
                 </div>
                 {settings.productName && (
                   <div className="text-sm text-muted-foreground">
-                    Product: {settings.productName}
+                    제품: {settings.productName}
                   </div>
                 )}
               </div>
 
               <div className="space-y-2">
                 <div className="text-xs font-medium text-muted-foreground">
-                  Included Content
+                  포함 내용
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">Temperature Chart</Badge>
-                  <Badge variant="secondary">Session Results</Badge>
-                  <Badge variant="secondary">Hot Water Analysis</Badge>
-                  <Badge variant="secondary">Product Analysis</Badge>
+                  <Badge variant="secondary">온도 그래프</Badge>
+                  <Badge variant="secondary">회차별 결과</Badge>
+                  <Badge variant="secondary">열수 분석</Badge>
+                  <Badge variant="secondary">품온 분석</Badge>
                   {hasAnalysisGroups && (
-                    <Badge variant="secondary">Analysis Groups ({analysisGroups.length})</Badge>
+                    <Badge variant="secondary">분석 그룹 ({analysisGroups.length})</Badge>
                   )}
                   {settings.validationNotes && (
-                    <Badge variant="secondary">Notes</Badge>
+                    <Badge variant="secondary">메모</Badge>
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-center">
                 <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">Loggers</div>
+                  <div className="text-xs text-muted-foreground">로거 수</div>
                   <div className="text-xl font-bold text-primary">{loggers.length}</div>
                 </div>
                 <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">Sessions</div>
+                  <div className="text-xs text-muted-foreground">회차 수</div>
                   <div className="text-xl font-bold text-primary">{sessions.length}</div>
                 </div>
               </div>
@@ -611,18 +611,18 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
 
         <div className="flex justify-end gap-3 pt-4 border-t">
           <Button variant="outline" onClick={() => setIsOpen(false)}>
-            Cancel
+            취소
           </Button>
           <Button onClick={generatePDF} disabled={isGenerating || !isReady}>
             {isGenerating ? (
               <>
                 <span className="animate-spin mr-2">⏳</span>
-                Generating...
+                생성 중...
               </>
             ) : (
               <>
                 <FileDown className="w-4 h-4 mr-2" />
-                Download PDF
+                PDF 다운로드
               </>
             )}
           </Button>
