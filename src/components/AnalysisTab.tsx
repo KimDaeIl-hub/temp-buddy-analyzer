@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { DataLogger, MeasurementSession, TemperatureRecord } from "@/types/temperature";
 import { AnalysisGroup, AnalysisGroupItem, AnalysisGroupResult } from "@/types/analysis";
+import { DataFile } from "@/types/file";
 import { getRecordsInSession, calculateProductResults, calculateHotWaterResults } from "@/utils/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,12 +17,12 @@ import {
   Calculator,
   Clock,
   Thermometer,
-  TrendingUp
+  TrendingUp,
+  FileText
 } from "lucide-react";
 
 interface AnalysisTabProps {
-  loggers: DataLogger[];
-  sessions: MeasurementSession[];
+  files: DataFile[];
   analysisGroups: AnalysisGroup[];
   onAnalysisGroupsChange: (groups: AnalysisGroup[]) => void;
 }
@@ -33,11 +34,19 @@ const LOGGER_COLORS: Record<string, string> = {
   'logger-4': 'bg-amber-100 border-amber-400 text-amber-700',
 };
 
-export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroupsChange }: AnalysisTabProps) {
+export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: AnalysisTabProps) {
   const [draggedItem, setDraggedItem] = useState<AnalysisGroupItem | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
 
-  const configuredLoggers = loggers.filter(l => l.type !== null);
+  // Get all configured loggers from all files
+  const configuredLoggers = files.flatMap(file => 
+    file.loggers.filter(l => l.type !== null).map(logger => ({
+      logger,
+      fileId: file.id,
+      fileName: file.name,
+      sessions: file.sessions
+    }))
+  );
 
   const handleCreateGroup = () => {
     const name = newGroupName.trim() || `분석 그룹 ${analysisGroups.length + 1}`;
@@ -117,8 +126,16 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
     let totalFValue = 0;
 
     group.items.forEach(item => {
-      const logger = loggers.find(l => l.id === item.loggerId);
-      const session = sessions.find(s => s.id === item.sessionId);
+      // Find logger and session across all files
+      let logger: DataLogger | undefined;
+      let session: MeasurementSession | undefined;
+      
+      for (const file of files) {
+        const foundLogger = file.loggers.find(l => l.id === item.loggerId);
+        const foundSession = file.sessions.find(s => s.id === item.sessionId);
+        if (foundLogger) logger = foundLogger;
+        if (foundSession) session = foundSession;
+      }
       
       if (!logger || !session) return;
 
@@ -142,7 +159,6 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
         fValue = result.sessionFValue;
       }
 
-      // Update aggregates
       sessionRecords.forEach(r => {
         tempSum += r.temperature;
         tempCount++;
@@ -179,7 +195,7 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
       totalFValue,
       itemResults,
     };
-  }, [loggers, sessions]);
+  }, [files]);
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -197,8 +213,8 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
         <CardContent>
           <ScrollArea className="h-[400px] pr-3">
             <div className="space-y-4">
-              {configuredLoggers.map(logger => (
-                <div key={logger.id} className="space-y-2">
+              {configuredLoggers.map(({ logger, fileId, fileName, sessions }) => (
+                <div key={`${fileId}-${logger.id}`} className="space-y-2">
                   <div className="flex items-center gap-2">
                     {logger.type === 'hotwater' ? (
                       <Droplets className="w-4 h-4 text-sky-500" />
@@ -209,6 +225,12 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
                     <Badge variant="outline" className="text-xs">
                       {logger.type === 'hotwater' ? '열수' : '품온'}
                     </Badge>
+                    {files.length > 1 && (
+                      <Badge variant="secondary" className="text-xs">
+                        <FileText className="w-3 h-3 mr-1" />
+                        {fileName.replace('.csv', '')}
+                      </Badge>
+                    )}
                   </div>
                   
                   <div className="ml-6 space-y-1">
@@ -245,7 +267,7 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
                   로거를 먼저 설정해주세요
                 </p>
               )}
-              {configuredLoggers.length > 0 && sessions.length === 0 && (
+              {configuredLoggers.length > 0 && configuredLoggers.every(c => c.sessions.length === 0) && (
                 <p className="text-sm text-muted-foreground text-center py-8">
                   회차를 먼저 분할해주세요
                 </p>

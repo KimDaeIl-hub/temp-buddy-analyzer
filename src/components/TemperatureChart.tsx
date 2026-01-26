@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { 
   TrendingUp, Scissors, Trash2, Check, MousePointer, ArrowRight, 
-  Download, ZoomIn, ZoomOut, RotateCcw, Image, Target
+  Download, ZoomIn, ZoomOut, RotateCcw, Image, Target, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { formatDateTime } from "@/utils/csvParser";
 import html2canvas from "html2canvas";
@@ -249,6 +249,29 @@ export const TemperatureChart = forwardRef<TemperatureChartRef, TemperatureChart
     setZoomRange([0, 100]);
   }, []);
 
+  // Pan controls (left/right movement when zoomed in)
+  const handlePanLeft = useCallback(() => {
+    const range = zoomRange[1] - zoomRange[0];
+    if (range >= 100) return; // Can't pan when at 100%
+    const moveAmount = Math.max(5, range * 0.3); // Move by 30% of visible range or 5%
+    setZoomRange([
+      Math.max(0, zoomRange[0] - moveAmount),
+      Math.max(range, zoomRange[1] - moveAmount)
+    ]);
+  }, [zoomRange]);
+
+  const handlePanRight = useCallback(() => {
+    const range = zoomRange[1] - zoomRange[0];
+    if (range >= 100) return; // Can't pan when at 100%
+    const moveAmount = Math.max(5, range * 0.3); // Move by 30% of visible range or 5%
+    setZoomRange([
+      Math.min(100 - range, zoomRange[0] + moveAmount),
+      Math.min(100, zoomRange[1] + moveAmount)
+    ]);
+  }, [zoomRange]);
+
+  const isZoomed = zoomRange[0] > 0 || zoomRange[1] < 100;
+
   // Save chart as image
   const saveChartAsImage = useCallback(async (sessionId?: number) => {
     if (!chartRef.current) return;
@@ -341,8 +364,18 @@ export const TemperatureChart = forwardRef<TemperatureChartRef, TemperatureChart
             </CardTitle>
             
             <div className="flex items-center gap-2 flex-wrap">
-              {/* Zoom controls */}
+              {/* Pan and Zoom controls */}
               <div className="flex items-center gap-1 border rounded-lg p-1 bg-background">
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  className="h-7 w-7" 
+                  onClick={handlePanLeft} 
+                  disabled={!isZoomed || zoomRange[0] <= 0}
+                  title="왼쪽으로 이동"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomIn} title="확대">
                   <ZoomIn className="w-4 h-4" />
                 </Button>
@@ -351,6 +384,16 @@ export const TemperatureChart = forwardRef<TemperatureChartRef, TemperatureChart
                 </Button>
                 <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleResetZoom} title="초기화">
                   <RotateCcw className="w-4 h-4" />
+                </Button>
+                <Button 
+                  size="icon" 
+                  variant="ghost" 
+                  className="h-7 w-7" 
+                  onClick={handlePanRight} 
+                  disabled={!isZoomed || zoomRange[1] >= 100}
+                  title="오른쪽으로 이동"
+                >
+                  <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
 
