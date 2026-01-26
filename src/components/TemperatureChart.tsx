@@ -76,26 +76,26 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     [loggers]
   );
 
-  const handleChartMouseDown = useCallback((e: any) => {
+  // Click-based selection: first click = start, second click = end
+  const handleChartClick = useCallback((e: any) => {
     if (!isSelectingSession) return;
     if (e && e.activePayload && e.activePayload[0]) {
       const timestamp = e.activePayload[0].payload.timestamp;
-      setSelectionStart(timestamp);
-      setSelectionEnd(null);
+      
+      if (selectionStart === null) {
+        // First click - set start point
+        setSelectionStart(timestamp);
+        setSelectionEnd(null);
+      } else if (selectionEnd === null) {
+        // Second click - set end point
+        setSelectionEnd(timestamp);
+      } else {
+        // Already have both - reset and start new selection
+        setSelectionStart(timestamp);
+        setSelectionEnd(null);
+      }
     }
-  }, [isSelectingSession]);
-
-  const handleChartMouseMove = useCallback((e: any) => {
-    if (!isSelectingSession || selectionStart === null) return;
-    if (e && e.activePayload && e.activePayload[0]) {
-      const timestamp = e.activePayload[0].payload.timestamp;
-      setSelectionEnd(timestamp);
-    }
-  }, [isSelectingSession, selectionStart]);
-
-  const handleChartMouseUp = useCallback(() => {
-    // Selection complete - ready for confirmation
-  }, []);
+  }, [isSelectingSession, selectionStart, selectionEnd]);
 
   const confirmSession = useCallback(() => {
     if (selectionStart === null || selectionEnd === null) return;
@@ -211,9 +211,9 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                 <MousePointer className="w-4 h-4 text-primary" />
                 <p className="text-sm text-primary">
                   {selectionStart === null 
-                    ? "그래프 위에서 드래그하여 구간을 선택하세요" 
+                    ? "그래프를 클릭하여 시작점을 선택하세요" 
                     : selectionEnd === null
-                      ? "드래그 중..."
+                      ? `⏱ 시작점: ${new Date(selectionStart).toLocaleTimeString()} - 종료점을 클릭하세요`
                       : `✅ 선택됨: ${new Date(Math.min(selectionStart, selectionEnd)).toLocaleTimeString()} ~ ${new Date(Math.max(selectionStart, selectionEnd)).toLocaleTimeString()}`
                   }
                 </p>
@@ -266,9 +266,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
             <LineChart 
               data={chartData} 
               margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              onMouseDown={handleChartMouseDown}
-              onMouseMove={handleChartMouseMove}
-              onMouseUp={handleChartMouseUp}
+              onClick={handleChartClick}
             >
               <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
               <XAxis 
