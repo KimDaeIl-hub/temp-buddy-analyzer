@@ -5,14 +5,13 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Thermometer, Droplets, Package } from "lucide-react";
-import { formatDateTime } from "@/utils/csvParser";
 
 interface LoggerConfigProps {
   loggers: DataLogger[];
   sessions: MeasurementSession[];
   onUpdateLogger: (loggerId: string, updates: Partial<DataLogger>, targetFileId?: string) => void;
-  onUpdateSession: (sessionId: number, updates: Partial<MeasurementSession>, targetFileId?: string) => void;
-  currentFileId?: string; // For individual mode
+  onUpdateSession: (sessionId: number, updates: Partial<MeasurementSession>, loggerId?: string, targetFileId?: string) => void;
+  currentFileId?: string;
   viewMode: 'combined' | 'individual';
 }
 
@@ -27,12 +26,19 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
   // Extract file ID from prefixed logger ID for combined mode
   const extractFileId = (loggerId: string): string | undefined => {
     if (viewMode === 'combined' && loggerId.includes('-')) {
-      // Format: fileId-loggerId
       const parts = loggerId.split('-');
-      // The file ID is everything before the last part
       return parts.slice(0, -1).join('-');
     }
     return currentFileId;
+  };
+
+  // Extract original logger ID from prefixed logger ID
+  const extractOriginalLoggerId = (loggerId: string): string => {
+    if (viewMode === 'combined' && loggerId.includes('-')) {
+      const parts = loggerId.split('-');
+      return parts[parts.length - 1];
+    }
+    return loggerId;
   };
 
   const handleLoggerUpdate = (loggerId: string, updates: Partial<DataLogger>) => {
@@ -40,16 +46,29 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
     onUpdateLogger(loggerId, updates, targetFileId);
   };
 
-  const handleSessionUpdate = (sessionId: number, updates: Partial<MeasurementSession>) => {
-    onUpdateSession(sessionId, updates, currentFileId);
+  // Handle per-logger, per-session temperature update
+  const handleLoggerSessionTempUpdate = (loggerId: string, sessionId: number, temperature: number | undefined) => {
+    const targetFileId = viewMode === 'individual' ? currentFileId : extractFileId(loggerId);
+    const originalLoggerId = extractOriginalLoggerId(loggerId);
+    onUpdateSession(sessionId, { 
+      // Update loggerSetTemperatures map
+      loggerSetTemperaturesUpdate: { loggerId: originalLoggerId, temperature }
+    } as any, originalLoggerId, targetFileId);
   };
 
-  // Get loggers that are configured as hotwater type
-  const hotwaterLoggers = loggers.filter(l => l.type === 'hotwater');
+  // Get temperature for a specific logger and session
+  const getLoggerSessionTemp = (loggerId: string, session: MeasurementSession): number | undefined => {
+    const originalLoggerId = extractOriginalLoggerId(loggerId);
+    // First check loggerSetTemperatures map
+    if (session.loggerSetTemperatures && session.loggerSetTemperatures[originalLoggerId] !== undefined) {
+      return session.loggerSetTemperatures[originalLoggerId];
+    }
+    // Fallback to legacy setTemperature
+    return session.setTemperature;
+  };
 
   return (
     <div className="space-y-6">
-      {/* Logger Type Configuration */}
       <div>
         <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
           <Thermometer className="w-4 h-4 text-primary" />
@@ -85,7 +104,7 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
                     <RadioGroupItem value="hotwater" id={`${logger.id}-hotwater`} />
                     <Label 
                       htmlFor={`${logger.id}-hotwater`}
-                      className="flex items-center gap-1 cursor-pointer font-normal text-sm"
+                      className="flex items-center gap-1 cursor-pointer font-normal text-sm whitespace-nowrap"
                     >
                       <Droplets className="w-3 h-3 text-chart-1" />
                       열수
@@ -95,7 +114,7 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
                     <RadioGroupItem value="product" id={`${logger.id}-product`} />
                     <Label 
                       htmlFor={`${logger.id}-product`}
-                      className="flex items-center gap-1 cursor-pointer font-normal text-sm"
+                      className="flex items-center gap-1 cursor-pointer font-normal text-sm whitespace-nowrap"
                     >
                       <Package className="w-3 h-3 text-chart-2" />
                       품온
@@ -103,35 +122,40 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
                   </div>
                 </RadioGroup>
 
-                {/* Hot water: show session temperature inputs */}
+                {/* Hot water: show session temperature inputs per logger */}
                 {logger.type === 'hotwater' && sessions.length > 0 && (
                   <div className="mt-3 pt-3 border-t space-y-2">
                     <Label className="text-xs text-muted-foreground">회차별 열수 설정 온도</Label>
                     <div className="space-y-2">
-                      {sessions.map((session) => (
-                        <div key={session.id} className="flex items-center gap-2">
-                          <Badge variant="secondary" className="text-xs shrink-0 min-w-[45px] justify-center">
-                            {session.name}
-                          </Badge>
-                          <Input
-                            type="number"
-                            placeholder="예: 85"
-                            value={session.setTemperature || ''}
-                            onChange={(e) => 
-                              handleSessionUpdate(session.id, { 
-                                setTemperature: e.target.value ? parseFloat(e.target.value) : undefined 
-                              })
-                            }
-                            className="h-7 w-20 text-xs"
-                          />
-                          <span className="text-xs text-muted-foreground whitespace-nowrap">
-                            {session.setTemperature 
-                              ? `≥ ${(session.setTemperature - 2.4).toFixed(1)}℃`
-                              : '℃'
-                            }
-                          </span>
-                        </div>
-                      ))}
+                      {sessions.map((session) => {
+                        const currentTemp = getLoggerSessionTemp(logger.id, session);
+                        return (
+                          <div key={session.id} className="flex items-center gap-2">
+                            <Badge variant="secondary" className="text-xs shrink-0 min-w-[45px] justify-center">
+                              {session.name}
+                            </Badge>
+                            <Input
+                              type="number"
+                              placeholder="예: 85"
+                              value={currentTemp || ''}
+                              onChange={(e) => 
+                                handleLoggerSessionTempUpdate(
+                                  logger.id, 
+                                  session.id, 
+                                  e.target.value ? parseFloat(e.target.value) : undefined
+                                )
+                              }
+                              className="h-7 w-20 text-xs"
+                            />
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              {currentTemp 
+                                ? `≥ ${(currentTemp - 2.4).toFixed(1)}℃`
+                                : '℃'
+                              }
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -149,13 +173,13 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
                     >
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="pasteurization" id={`${logger.id}-past`} />
-                        <Label htmlFor={`${logger.id}-past`} className="cursor-pointer font-normal text-xs">
+                        <Label htmlFor={`${logger.id}-past`} className="cursor-pointer font-normal text-xs whitespace-nowrap">
                           살균 (F63℃)
                         </Label>
                       </div>
                       <div className="flex items-center space-x-2">
                         <RadioGroupItem value="sterilization" id={`${logger.id}-ster`} />
-                        <Label htmlFor={`${logger.id}-ster`} className="cursor-pointer font-normal text-xs">
+                        <Label htmlFor={`${logger.id}-ster`} className="cursor-pointer font-normal text-xs whitespace-nowrap">
                           멸균 (F121℃)
                         </Label>
                       </div>

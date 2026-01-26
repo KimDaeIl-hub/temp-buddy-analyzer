@@ -258,14 +258,14 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
             <div className="space-y-4">
               {configuredLoggers.map(({ logger, fileId, fileName, sessions, compositeLoggerId }) => (
                 <div key={compositeLoggerId} className="space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {logger.type === 'hotwater' ? (
-                      <Droplets className="w-4 h-4 text-sky-500" />
+                      <Droplets className="w-4 h-4 text-sky-500 shrink-0" />
                     ) : (
-                      <Beaker className="w-4 h-4 text-emerald-500" />
+                      <Beaker className="w-4 h-4 text-emerald-500 shrink-0" />
                     )}
-                    <span className="text-sm font-medium">{logger.name}</span>
-                    <Badge variant="outline" className="text-xs">
+                    <span className="text-sm font-medium truncate max-w-[150px]">{logger.name}</span>
+                    <Badge variant="outline" className="text-xs shrink-0 whitespace-nowrap">
                       {logger.type === 'hotwater' ? '열수' : '품온'}
                     </Badge>
                     {files.length > 1 && (
@@ -438,33 +438,33 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
 
                           {/* Results */}
                           {result && (
-                            <div className={`grid grid-cols-3 gap-3 pt-3 border-t ${groupColor.accent}`}>
+                            <div className={`grid grid-cols-3 gap-2 pt-3 border-t ${groupColor.accent}`}>
                               <div className="p-2 rounded-lg bg-background/80">
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Thermometer className="w-3 h-3" />
-                                  평균 온도 (기준치 이상)
+                                <div className="flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap">
+                                  <Thermometer className="w-3 h-3 shrink-0" />
+                                  <span>평균 온도</span>
                                 </div>
-                                <div className="text-lg font-bold text-primary">
+                                <div className="text-base font-bold text-primary">
                                   {(result.itemResults.reduce((sum, item) => sum + item.averageTemp, 0) / result.itemResults.length).toFixed(2)}°C
                                 </div>
                               </div>
                               
                               <div className="p-2 rounded-lg bg-background/80">
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Clock className="w-3 h-3" />
-                                  평균 유지 시간
+                                <div className="flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap">
+                                  <Clock className="w-3 h-3 shrink-0" />
+                                  <span>평균 유지</span>
                                 </div>
-                                <div className="text-lg font-bold">
+                                <div className="text-base font-bold">
                                   {(result.totalDurationMinutes / result.itemResults.length).toFixed(1)}분
                                 </div>
                               </div>
                               
                               <div className="p-2 rounded-lg bg-background/80">
-                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <TrendingUp className="w-3 h-3" />
-                                  평균 F-value
+                                <div className="flex items-center gap-1 text-[10px] text-muted-foreground whitespace-nowrap">
+                                  <TrendingUp className="w-3 h-3 shrink-0" />
+                                  <span>평균 F-value</span>
                                 </div>
-                                <div className="text-lg font-bold text-accent-foreground">
+                                <div className="text-base font-bold text-accent-foreground">
                                   {(result.totalFValue / result.itemResults.length).toFixed(2)}
                                 </div>
                               </div>

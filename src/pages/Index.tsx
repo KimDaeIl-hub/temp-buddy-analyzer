@@ -116,7 +116,7 @@ const Index = () => {
     }));
   }, []);
 
-  const handleUpdateSession = useCallback((sessionId: number, updates: Partial<MeasurementSession>, targetFileId?: string) => {
+  const handleUpdateSession = useCallback((sessionId: number, updates: Partial<MeasurementSession> & { loggerSetTemperaturesUpdate?: { loggerId: string; temperature: number | undefined } }, loggerId?: string, targetFileId?: string) => {
     setFiles(prev => prev.map(file => {
       // If targetFileId is specified, only update that file
       if (targetFileId && file.id !== targetFileId) {
@@ -130,6 +130,19 @@ const Index = () => {
           const fileIndex = prev.findIndex(f => f.id === file.id);
           const offsetId = sessionId - fileIndex * 1000;
           if (s.id === offsetId || s.id === sessionId) {
+            // Handle per-logger temperature update
+            if (updates.loggerSetTemperaturesUpdate) {
+              const { loggerId: logId, temperature } = updates.loggerSetTemperaturesUpdate;
+              const newLoggerTemps = { ...(s.loggerSetTemperatures || {}) };
+              if (temperature !== undefined) {
+                newLoggerTemps[logId] = temperature;
+              } else {
+                delete newLoggerTemps[logId];
+              }
+              // Remove the special update field and apply normal updates
+              const { loggerSetTemperaturesUpdate, ...normalUpdates } = updates;
+              return { ...s, ...normalUpdates, loggerSetTemperatures: newLoggerTemps };
+            }
             return { ...s, ...updates };
           }
           return s;

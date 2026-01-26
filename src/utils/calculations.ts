@@ -156,8 +156,16 @@ export function calculateSessionResults(
     if (sessionRecords.length === 0) return;
     
     if (logger.type === 'hotwater') {
-      // Use session's setTemperature if available, otherwise use logger's setTemperature
-      const setTemperature = session.setTemperature || logger.setTemperature;
+      // Get logger-specific temperature from loggerSetTemperatures, or fallback to session/logger level
+      let setTemperature: number | undefined;
+      
+      // First try logger-specific temperature
+      if (session.loggerSetTemperatures && session.loggerSetTemperatures[logger.id] !== undefined) {
+        setTemperature = session.loggerSetTemperatures[logger.id];
+      } else {
+        // Fallback to legacy setTemperature
+        setTemperature = session.setTemperature || logger.setTemperature;
+      }
       
       if (!setTemperature) return;
       
