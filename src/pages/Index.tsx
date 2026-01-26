@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { parseCSVContent } from "@/utils/csvParser";
 import { FileUpload } from "@/components/FileUpload";
@@ -6,17 +6,19 @@ import { LoggerConfig } from "@/components/LoggerConfig";
 import { SessionManager } from "@/components/SessionManager";
 import { DataTable } from "@/components/DataTable";
 import { ResultsSummary } from "@/components/ResultsSummary";
-import { TemperatureChart } from "@/components/TemperatureChart";
+import { TemperatureChart, TemperatureChartRef } from "@/components/TemperatureChart";
+import { PDFReportGenerator } from "@/components/PDFReportGenerator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp } from "lucide-react";
+import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp, FileDown } from "lucide-react";
 
 const Index = () => {
   const [loggers, setLoggers] = useState<DataLogger[]>([]);
   const [sessions, setSessions] = useState<MeasurementSession[]>([]);
   const [fileName, setFileName] = useState<string>("");
   const [activeTab, setActiveTab] = useState("chart");
+  const chartComponentRef = useRef<TemperatureChartRef>(null);
 
   const handleFileLoad = useCallback((content: string, name: string) => {
     const parsedLoggers = parseCSVContent(content);
@@ -48,7 +50,7 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b bg-card/80 backdrop-blur-sm">
+      <header className="sticky top-0 z-50 border-b bg-card/95 backdrop-blur-sm">
         <div className="container flex items-center justify-between h-16 px-4">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/10">
@@ -65,6 +67,11 @@ const Index = () => {
               <Badge variant="secondary" className="hidden sm:flex">
                 {fileName} ({loggers.length}개 로거)
               </Badge>
+              <PDFReportGenerator 
+                loggers={loggers}
+                sessions={sessions}
+                chartRef={chartComponentRef?.current?.chartRef || { current: null }}
+              />
               <Button variant="outline" size="sm" onClick={handleReset}>
                 <RefreshCw className="w-4 h-4 mr-2" />
                 새 파일
@@ -90,27 +97,27 @@ const Index = () => {
             
             <div className="grid gap-4 md:grid-cols-3 mt-8">
               <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-chart-1/20 w-fit mx-auto mb-3">
-                  <TrendingUp className="w-5 h-5 text-chart-1" />
+                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                  <TrendingUp className="w-5 h-5 text-primary" />
                 </div>
                 <h3 className="font-medium mb-1">다중 로거 지원</h3>
                 <p className="text-sm text-muted-foreground">4개 로거 동시 분석</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-chart-2/20 w-fit mx-auto mb-3">
-                  <BarChart3 className="w-5 h-5 text-chart-2" />
+                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                  <BarChart3 className="w-5 h-5 text-primary" />
                 </div>
                 <h3 className="font-medium mb-1">그래프 회차 분할</h3>
                 <p className="text-sm text-muted-foreground">직관적 구간 선택</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-primary/20 w-fit mx-auto mb-3">
-                  <Database className="w-5 h-5 text-primary" />
+                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                  <FileDown className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">회차별 설정</h3>
-                <p className="text-sm text-muted-foreground">열수 온도 개별 지정</p>
+                <h3 className="font-medium mb-1">PDF 리포트</h3>
+                <p className="text-sm text-muted-foreground">분석 결과 내보내기</p>
               </div>
             </div>
           </div>
@@ -135,6 +142,7 @@ const Index = () => {
 
                 <TabsContent value="chart" className="space-y-6">
                   <TemperatureChart 
+                    ref={chartComponentRef}
                     loggers={loggers} 
                     sessions={sessions}
                     onSessionsChange={setSessions}
