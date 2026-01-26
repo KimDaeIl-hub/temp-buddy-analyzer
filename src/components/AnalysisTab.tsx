@@ -34,8 +34,19 @@ const LOGGER_COLORS: Record<string, string> = {
   'logger-4': 'bg-amber-100 border-amber-400 text-amber-700',
 };
 
+const GROUP_COLORS = [
+  { border: 'border-primary', bg: 'bg-primary/5', accent: 'bg-primary/10' },
+  { border: 'border-emerald-500', bg: 'bg-emerald-50', accent: 'bg-emerald-100' },
+  { border: 'border-amber-500', bg: 'bg-amber-50', accent: 'bg-amber-100' },
+  { border: 'border-rose-500', bg: 'bg-rose-50', accent: 'bg-rose-100' },
+  { border: 'border-violet-500', bg: 'bg-violet-50', accent: 'bg-violet-100' },
+  { border: 'border-cyan-500', bg: 'bg-cyan-50', accent: 'bg-cyan-100' },
+];
+
 export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: AnalysisTabProps) {
   const [draggedItem, setDraggedItem] = useState<AnalysisGroupItem | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
   // Get all configured loggers from all files - use composite ID for uniqueness
@@ -68,15 +79,29 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
 
   const handleDragStart = (e: React.DragEvent, item: AnalysisGroupItem) => {
     setDraggedItem(item);
+    setIsDragging(true);
     e.dataTransfer.effectAllowed = "copy";
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
+  const handleDragEnd = () => {
+    setDraggedItem(null);
+    setDragOverGroupId(null);
+    setIsDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent, groupId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
+    setDragOverGroupId(groupId);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverGroupId(null);
   };
 
   const handleDrop = (e: React.DragEvent, groupId: string) => {
+    setDragOverGroupId(null);
+    setIsDragging(false);
     e.preventDefault();
     if (!draggedItem) return;
 
@@ -99,6 +124,10 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
 
     onAnalysisGroupsChange(updatedGroups);
     setDraggedItem(null);
+  };
+
+  const getGroupColor = (index: number) => {
+    return GROUP_COLORS[index % GROUP_COLORS.length];
   };
 
   const handleRemoveItem = (groupId: string, loggerId: string, sessionId: number) => {
@@ -248,30 +277,37 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                   </div>
                   
                   <div className="ml-6 space-y-1">
-                    {sessions.map(session => (
-                      <div
-                        key={`${compositeLoggerId}-${session.id}`}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, {
-                          loggerId: compositeLoggerId,
-                          loggerName: files.length > 1 ? `[${fileName.replace('.csv', '')}] ${logger.name}` : logger.name,
-                          loggerType: logger.type,
-                          sessionId: session.id,
-                          sessionName: session.name,
-                          sterilizationType: logger.sterilizationType,
-                        })}
-                        className={`
-                          px-3 py-2 rounded-md border cursor-grab active:cursor-grabbing
-                          hover:shadow-sm transition-all text-xs
-                          ${LOGGER_COLORS[logger.id] || 'bg-muted border-border'}
-                        `}
-                      >
-                        <div className="flex items-center gap-2">
-                          <GripVertical className="w-3 h-3 opacity-50" />
-                          <span className="font-medium truncate">{session.name}</span>
+                    {sessions.map(session => {
+                      const itemData = {
+                        loggerId: compositeLoggerId,
+                        loggerName: files.length > 1 ? `[${fileName.replace('.csv', '')}] ${logger.name}` : logger.name,
+                        loggerType: logger.type,
+                        sessionId: session.id,
+                        sessionName: session.name,
+                        sterilizationType: logger.sterilizationType,
+                      };
+                      const isBeingDragged = isDragging && draggedItem?.loggerId === compositeLoggerId && draggedItem?.sessionId === session.id;
+                      
+                      return (
+                        <div
+                          key={`${compositeLoggerId}-${session.id}`}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, itemData)}
+                          onDragEnd={handleDragEnd}
+                          className={`
+                            px-3 py-2 rounded-md border cursor-grab active:cursor-grabbing
+                            transition-all text-xs
+                            ${LOGGER_COLORS[logger.id] || 'bg-muted border-border'}
+                            ${isBeingDragged ? 'opacity-50 scale-95 shadow-lg ring-2 ring-primary' : 'hover:shadow-sm'}
+                          `}
+                        >
+                          <div className="flex items-center gap-2">
+                            <GripVertical className="w-3 h-3 opacity-50" />
+                            <span className="font-medium truncate">{session.name}</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -316,19 +352,30 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
         <CardContent>
           <ScrollArea className="h-[500px] pr-3">
             <div className="space-y-4">
-              {analysisGroups.map(group => {
+              {analysisGroups.map((group, groupIndex) => {
                 const result = calculateGroupResult(group);
+                const groupColor = getGroupColor(groupIndex);
+                const isDropTarget = dragOverGroupId === group.id;
                 
                 return (
                   <Card 
                     key={group.id}
-                    className="border-2 border-dashed"
-                    onDragOver={handleDragOver}
+                    className={`
+                      border-2 transition-all duration-200
+                      ${groupColor.border} ${groupColor.bg}
+                      ${isDropTarget ? 'border-solid shadow-lg scale-[1.02]' : 'border-dashed'}
+                      ${isDragging && !isDropTarget ? 'opacity-70' : ''}
+                    `}
+                    onDragOver={(e) => handleDragOver(e, group.id)}
+                    onDragLeave={handleDragLeave}
                     onDrop={(e) => handleDrop(e, group.id)}
                   >
                     <CardHeader className="py-3">
                       <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm">{group.name}</CardTitle>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-3 h-3 rounded-full ${groupColor.border.replace('border-', 'bg-')}`} />
+                          <CardTitle className="text-sm">{group.name}</CardTitle>
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -342,21 +389,30 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                     <CardContent className="pt-0">
                       {/* Drop zone */}
                       {group.items.length === 0 ? (
-                        <div className="h-20 rounded-lg border-2 border-dashed border-muted-foreground/20 flex items-center justify-center">
-                          <p className="text-xs text-muted-foreground">
-                            여기에 항목을 드래그하세요
+                        <div className={`
+                          h-20 rounded-lg border-2 border-dashed flex items-center justify-center
+                          transition-all duration-200
+                          ${isDropTarget 
+                            ? 'border-primary bg-primary/10 scale-105' 
+                            : 'border-muted-foreground/20'}
+                        `}>
+                          <p className={`text-xs ${isDropTarget ? 'text-primary font-medium' : 'text-muted-foreground'}`}>
+                            {isDropTarget ? '여기에 놓으세요!' : '여기에 항목을 드래그하세요'}
                           </p>
                         </div>
                       ) : (
                         <div className="space-y-3">
                           {/* Items */}
-                          <div className="flex flex-wrap gap-2">
+                          <div className={`
+                            flex flex-wrap gap-2 p-2 rounded-lg transition-all duration-200
+                            ${isDropTarget ? 'bg-primary/10 ring-2 ring-primary/30' : ''}
+                          `}>
                             {group.items.map(item => (
                               <Badge
                                 key={`${item.loggerId}-${item.sessionId}`}
                                 variant="secondary"
                                 className={`
-                                  gap-1 pr-1
+                                  gap-1 pr-1 transition-transform
                                   ${LOGGER_COLORS[item.loggerId] || ''}
                                 `}
                               >
@@ -373,12 +429,17 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                                 </Button>
                               </Badge>
                             ))}
+                            {isDropTarget && (
+                              <div className="px-3 py-1 rounded-md border-2 border-dashed border-primary bg-primary/5 text-xs text-primary animate-pulse">
+                                + 여기에 추가
+                              </div>
+                            )}
                           </div>
 
                           {/* Results */}
                           {result && (
-                            <div className="grid grid-cols-3 gap-3 pt-3 border-t">
-                              <div className="p-2 rounded-lg bg-primary/10">
+                            <div className={`grid grid-cols-3 gap-3 pt-3 border-t ${groupColor.accent}`}>
+                              <div className="p-2 rounded-lg bg-background/80">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <Thermometer className="w-3 h-3" />
                                   평균 온도 (기준치 이상)
@@ -388,7 +449,7 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                                 </div>
                               </div>
                               
-                              <div className="p-2 rounded-lg bg-secondary">
+                              <div className="p-2 rounded-lg bg-background/80">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <Clock className="w-3 h-3" />
                                   평균 유지 시간
@@ -398,7 +459,7 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                                 </div>
                               </div>
                               
-                              <div className="p-2 rounded-lg bg-accent">
+                              <div className="p-2 rounded-lg bg-background/80">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <TrendingUp className="w-3 h-3" />
                                   평균 F-value
