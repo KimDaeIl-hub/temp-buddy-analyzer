@@ -168,9 +168,12 @@ const Index = () => {
           </div>
           
           {files.length > 0 && (
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary" className="hidden sm:flex">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              <Badge variant="secondary" className="hidden sm:flex whitespace-nowrap">
                 {files.length}개 파일 · {totalLoggers}개 로거 · {totalSessions}개 회차
+              </Badge>
+              <Badge variant="secondary" className="flex sm:hidden whitespace-nowrap text-xs">
+                {files.length}F · {totalLoggers}L · {totalSessions}S
               </Badge>
               <ExportGenerator
                 files={files}
@@ -232,7 +235,7 @@ const Index = () => {
             <div className="lg:col-span-3">
               {/* File View Toggle */}
               {files.length > 1 && (
-                <div className="mb-4 flex items-center gap-4">
+                <div className="mb-4 flex flex-wrap items-center gap-2 sm:gap-4">
                   <FileViewToggle
                     files={files}
                     viewMode={viewMode}
@@ -240,19 +243,19 @@ const Index = () => {
                   />
                   
                   {viewMode.mode === 'combined' && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">회차 편집 파일:</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">편집:</span>
                       <Select
                         value={activeFileId || files[0]?.id}
                         onValueChange={setActiveFileId}
                       >
-                        <SelectTrigger className="w-40 h-8">
-                          <SelectValue placeholder="파일 선택" />
+                        <SelectTrigger className="w-28 sm:w-40 h-8">
+                          <SelectValue placeholder="파일" />
                         </SelectTrigger>
                         <SelectContent>
                           {files.map((file) => (
                             <SelectItem key={file.id} value={file.id}>
-                              {file.name}
+                              <span className="truncate">{file.name}</span>
                             </SelectItem>
                           ))}
                         </SelectContent>

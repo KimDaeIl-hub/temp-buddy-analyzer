@@ -38,13 +38,15 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
   const [draggedItem, setDraggedItem] = useState<AnalysisGroupItem | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
 
-  // Get all configured loggers from all files
+  // Get all configured loggers from all files - use composite ID for uniqueness
   const configuredLoggers = files.flatMap(file => 
     file.loggers.filter(l => l.type !== null).map(logger => ({
       logger,
       fileId: file.id,
       fileName: file.name,
-      sessions: file.sessions
+      sessions: file.sessions,
+      // Create unique composite ID for cross-file analysis
+      compositeLoggerId: `${file.id}::${logger.id}`,
     }))
   );
 
@@ -80,9 +82,10 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
 
     const updatedGroups = analysisGroups.map(group => {
       if (group.id === groupId) {
-        // Check if already exists
+        // Check if already exists - use composite ID for proper uniqueness across files
         const exists = group.items.some(
-          item => item.loggerId === draggedItem.loggerId && item.sessionId === draggedItem.sessionId
+          item => item.loggerId === draggedItem.loggerId && 
+                  item.sessionId === draggedItem.sessionId
         );
         if (exists) return group;
 
@@ -126,15 +129,26 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
     let totalFValue = 0;
 
     group.items.forEach(item => {
-      // Find logger and session across all files
+      // Find logger and session across all files using composite ID
       let logger: DataLogger | undefined;
       let session: MeasurementSession | undefined;
       
+      // Parse composite ID to find correct file
+      const [fileId, originalLoggerId] = item.loggerId.includes('::') 
+        ? item.loggerId.split('::') 
+        : [null, item.loggerId];
+      
       for (const file of files) {
-        const foundLogger = file.loggers.find(l => l.id === item.loggerId);
+        // Match by composite ID or fallback to original ID
+        if (fileId && file.id !== fileId) continue;
+        
+        const foundLogger = file.loggers.find(l => l.id === originalLoggerId || l.id === item.loggerId);
         const foundSession = file.sessions.find(s => s.id === item.sessionId);
-        if (foundLogger) logger = foundLogger;
-        if (foundSession) session = foundSession;
+        if (foundLogger && foundSession) {
+          logger = foundLogger;
+          session = foundSession;
+          break;
+        }
       }
       
       if (!logger || !session) return;
@@ -213,8 +227,8 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
         <CardContent>
           <ScrollArea className="h-[400px] pr-3">
             <div className="space-y-4">
-              {configuredLoggers.map(({ logger, fileId, fileName, sessions }) => (
-                <div key={`${fileId}-${logger.id}`} className="space-y-2">
+              {configuredLoggers.map(({ logger, fileId, fileName, sessions, compositeLoggerId }) => (
+                <div key={compositeLoggerId} className="space-y-2">
                   <div className="flex items-center gap-2">
                     {logger.type === 'hotwater' ? (
                       <Droplets className="w-4 h-4 text-sky-500" />
@@ -236,11 +250,11 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                   <div className="ml-6 space-y-1">
                     {sessions.map(session => (
                       <div
-                        key={`${logger.id}-${session.id}`}
+                        key={`${compositeLoggerId}-${session.id}`}
                         draggable
                         onDragStart={(e) => handleDragStart(e, {
-                          loggerId: logger.id,
-                          loggerName: logger.name,
+                          loggerId: compositeLoggerId,
+                          loggerName: files.length > 1 ? `[${fileName.replace('.csv', '')}] ${logger.name}` : logger.name,
                           loggerType: logger.type,
                           sessionId: session.id,
                           sessionName: session.name,
@@ -254,7 +268,7 @@ export function AnalysisTab({ files, analysisGroups, onAnalysisGroupsChange }: A
                       >
                         <div className="flex items-center gap-2">
                           <GripVertical className="w-3 h-3 opacity-50" />
-                          <span className="font-medium">{session.name}</span>
+                          <span className="font-medium truncate">{session.name}</span>
                         </div>
                       </div>
                     ))}

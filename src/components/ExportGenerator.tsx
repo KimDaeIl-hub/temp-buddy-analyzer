@@ -105,15 +105,26 @@ function calculateGroupResult(
   let totalFValue = 0;
 
   group.items.forEach(item => {
-    // Find logger and session across all files
+    // Find logger and session across all files using composite ID
     let logger = null;
     let session = null;
     
+    // Parse composite ID to find correct file
+    const [fileId, originalLoggerId] = item.loggerId.includes('::') 
+      ? item.loggerId.split('::') 
+      : [null, item.loggerId];
+    
     for (const file of files) {
-      const foundLogger = file.loggers.find(l => l.id === item.loggerId);
+      // Match by composite ID or fallback to original ID
+      if (fileId && file.id !== fileId) continue;
+      
+      const foundLogger = file.loggers.find(l => l.id === originalLoggerId || l.id === item.loggerId);
       const foundSession = file.sessions.find(s => s.id === item.sessionId);
-      if (foundLogger) logger = foundLogger;
-      if (foundSession) session = foundSession;
+      if (foundLogger && foundSession) {
+        logger = foundLogger;
+        session = foundSession;
+        break;
+      }
     }
     
     if (!logger || !session) return;
@@ -228,106 +239,221 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       const workbook = XLSX.utils.book_new();
       const allResults = getFilteredResults();
       
-      // Summary sheet
-      const summaryData = [
-        ['Validation Report'],
+      // ===== 1. Summary Sheet (styled like PDF) =====
+      const summaryData: any[][] = [
+        ['VALIDATION REPORT'],
         [''],
-        ['Report Date', new Date().toLocaleDateString()],
+        ['Report Information'],
+        ['Issue Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
         ['Product Name', settings.productName || '-'],
         ['Operator', settings.operatorName || '-'],
         ['Facility', settings.facilityName || '-'],
         [''],
-        ['Summary'],
+        ['Data Summary'],
         ['Total Files', files.length],
-        ['Total Loggers', totalLoggers],
-        ['Total Sessions', totalSessions],
+        ['Total Data Loggers', totalLoggers],
         ['Hot Water Loggers', allLoggers.filter(l => l.type === 'hotwater').length],
-        ['Product Loggers', allLoggers.filter(l => l.type === 'product').length],
+        ['Product Temp Loggers', allLoggers.filter(l => l.type === 'product').length],
+        ['Total Sessions', totalSessions],
+        [''],
       ];
       
       if (settings.validationNotes) {
-        summaryData.push([''], ['Notes', settings.validationNotes]);
+        summaryData.push(['Verification Notes']);
+        summaryData.push([settings.validationNotes]);
       }
       
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
+      
+      // Set column widths for better readability
+      summarySheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
+      
+      // Merge title cell
+      summarySheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
+      
       XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
       
-      // Hot Water Results
+      // ===== 2. Hot Water Results Sheet =====
       const hotwaterResults = allResults.filter(r => r.loggerType === 'hotwater');
       if (hotwaterResults.length > 0) {
-        const hwData = [
-          ['Logger', 'Session', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'Records'],
-          ...hotwaterResults.map(r => [
+        const hwData: any[][] = [
+          ['HOT WATER MEASUREMENT RESULTS'],
+          [''],
+          ['File', 'Logger Name', 'Session', 'Set Temp (°C)', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'Status'],
+        ];
+        
+        hotwaterResults.forEach(r => {
+          // Find file name
+          let fileName = '-';
+          for (const file of files) {
+            const foundLogger = file.loggers.find(l => l.name === r.loggerName || l.id === r.loggerId);
+            if (foundLogger) {
+              fileName = file.name.replace('.csv', '');
+              break;
+            }
+          }
+          
+          const threshold = r.threshold || 0;
+          const status = r.averageTemp >= threshold ? 'PASS' : 'FAIL';
+          
+          hwData.push([
+            fileName,
             r.loggerName,
             r.sessionName,
-            r.threshold?.toFixed(1) || '-',
+            (threshold + 2.4).toFixed(1),
+            threshold.toFixed(1),
             r.averageTemp.toFixed(2),
             r.durationMinutes.toFixed(1),
-            r.recordCount,
-          ])
-        ];
+            status
+          ]);
+        });
+        
+        // Add summary row
+        if (hotwaterResults.length > 1) {
+          const avgTemp = hotwaterResults.reduce((sum, r) => sum + r.averageTemp, 0) / hotwaterResults.length;
+          const totalDuration = hotwaterResults.reduce((sum, r) => sum + r.durationMinutes, 0);
+          hwData.push(['']);
+          hwData.push(['', '', 'AVERAGE/TOTAL', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), '']);
+        }
+        
         const hwSheet = XLSX.utils.aoa_to_sheet(hwData);
-        XLSX.utils.book_append_sheet(workbook, hwSheet, 'Hot Water');
+        hwSheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
+        hwSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }];
+        XLSX.utils.book_append_sheet(workbook, hwSheet, 'Hot Water Results');
       }
       
-      // Product Results
+      // ===== 3. Product Temperature Results Sheet =====
       const productResults = allResults.filter(r => r.loggerType === 'product');
       if (productResults.length > 0) {
-        const prodData = [
-          ['Logger', 'Session', 'Avg Temp (°C)', 'Duration (min)', 'F-Value', 'Type'],
-          ...productResults.map(r => [
+        const prodData: any[][] = [
+          ['PRODUCT TEMPERATURE MEASUREMENT RESULTS'],
+          [''],
+          ['File', 'Logger Name', 'Session', 'Type', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'F-Value', 'Status'],
+        ];
+        
+        productResults.forEach(r => {
+          // Find file name
+          let fileName = '-';
+          for (const file of files) {
+            const foundLogger = file.loggers.find(l => l.name === r.loggerName || l.id === r.loggerId);
+            if (foundLogger) {
+              fileName = file.name.replace('.csv', '');
+              break;
+            }
+          }
+          
+          const isSterilization = r.sterilizationType === 'sterilization';
+          const fValueType = isSterilization ? 'F121°C (Sterilization)' : 'F63°C (Pasteurization)';
+          const threshold = isSterilization ? 121 : 63;
+          const fValue = r.sessionFValue || 0;
+          const status = fValue > 0 ? 'PASS' : 'FAIL';
+          
+          prodData.push([
+            fileName,
             r.loggerName,
             r.sessionName,
+            fValueType,
+            threshold.toFixed(1),
             r.averageTemp.toFixed(2),
             r.durationMinutes.toFixed(1),
-            r.sessionFValue?.toFixed(2) || '0.00',
-            r.sterilizationType === 'sterilization' ? 'F121°C' : 'F63°C',
-          ])
-        ];
+            fValue.toFixed(4),
+            status
+          ]);
+        });
+        
+        // Add summary row
+        if (productResults.length > 1) {
+          const avgTemp = productResults.reduce((sum, r) => sum + r.averageTemp, 0) / productResults.length;
+          const totalDuration = productResults.reduce((sum, r) => sum + r.durationMinutes, 0);
+          const avgFValue = productResults.reduce((sum, r) => sum + (r.sessionFValue || 0), 0) / productResults.length;
+          prodData.push(['']);
+          prodData.push(['', '', 'AVERAGE/TOTAL', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), avgFValue.toFixed(4), '']);
+        }
+        
         const prodSheet = XLSX.utils.aoa_to_sheet(prodData);
-        XLSX.utils.book_append_sheet(workbook, prodSheet, 'Product Temp');
+        prodSheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
+        prodSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
+        XLSX.utils.book_append_sheet(workbook, prodSheet, 'Product Temp Results');
       }
       
-      // Analysis Groups
+      // ===== 4. Analysis Groups Sheet =====
       if (analysisGroups.length > 0) {
-        const groupData: any[][] = [['Group Name', 'Avg Temp (°C)', 'Avg Duration (min)', 'Avg F-Value', 'Items']];
+        const groupData: any[][] = [
+          ['CUSTOM ANALYSIS GROUPS'],
+          [''],
+        ];
         
-        analysisGroups.forEach(group => {
+        analysisGroups.forEach((group, groupIdx) => {
           const result = calculateGroupResult(group, files);
-          if (result) {
-            const avgTemp = result.itemResults.reduce((sum, i) => sum + i.averageTemp, 0) / result.itemResults.length;
-            const avgDuration = result.totalDurationMinutes / result.itemResults.length;
-            const avgFValue = result.totalFValue / result.itemResults.length;
-            
+          if (!result) return;
+          
+          const avgTemp = result.itemResults.reduce((sum, i) => sum + i.averageTemp, 0) / result.itemResults.length;
+          const avgDuration = result.totalDurationMinutes / result.itemResults.length;
+          const avgFValue = result.totalFValue / result.itemResults.length;
+          
+          groupData.push([`Group ${groupIdx + 1}: ${group.name}`]);
+          groupData.push(['Summary:', '', `Avg Temp: ${avgTemp.toFixed(2)}°C`, `Avg Duration: ${avgDuration.toFixed(1)} min`, `Avg F-Value: ${avgFValue.toFixed(4)}`]);
+          groupData.push(['']);
+          groupData.push(['Logger', 'Session', 'Avg Temp (°C)', 'Duration (min)', 'F-Value']);
+          
+          result.itemResults.forEach(item => {
             groupData.push([
-              group.name,
-              avgTemp.toFixed(2),
-              avgDuration.toFixed(1),
-              avgFValue.toFixed(2),
-              result.itemResults.map(i => `${i.loggerName} - ${i.sessionName}`).join(', ')
+              item.loggerName,
+              item.sessionName,
+              item.averageTemp.toFixed(2),
+              item.durationMinutes.toFixed(1),
+              item.fValue.toFixed(4)
             ]);
-          }
+          });
+          
+          groupData.push(['']);
+          groupData.push(['']);
         });
         
         const groupSheet = XLSX.utils.aoa_to_sheet(groupData);
+        groupSheet['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
         XLSX.utils.book_append_sheet(workbook, groupSheet, 'Analysis Groups');
       }
       
-      // Raw data sheets per file
+      // ===== 5. Raw Data Sheets per Logger =====
       files.forEach(file => {
         file.loggers.forEach(logger => {
-          const rawData = [
-            ['Date', 'Time', 'Temperature (°C)', 'F-Value'],
-            ...logger.records.map(r => [
+          if (logger.records.length === 0) return;
+          
+          const rawData: any[][] = [
+            [`RAW DATA: ${logger.name}`],
+            [`File: ${file.name}`],
+            [`Type: ${logger.type === 'hotwater' ? 'Hot Water' : logger.type === 'product' ? 'Product Temp' : 'Not Configured'}`],
+            [''],
+            ['Index', 'Date', 'Time', 'Temperature (°C)', 'F-Value'],
+          ];
+          
+          logger.records.forEach((r, idx) => {
+            rawData.push([
+              idx + 1,
               r.date,
               r.time,
               r.temperature,
-              r.fValue ?? '-'
-            ])
-          ];
+              r.fValue !== undefined ? r.fValue.toFixed(6) : '-'
+            ]);
+          });
           
-          const sheetName = `${file.name.replace('.csv', '').substring(0, 20)}_${logger.name}`.substring(0, 31);
+          // Add statistics
+          const temps = logger.records.map(r => r.temperature);
+          const minTemp = Math.min(...temps);
+          const maxTemp = Math.max(...temps);
+          const avgTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
+          
+          rawData.push(['']);
+          rawData.push(['Statistics']);
+          rawData.push(['Min Temp', minTemp.toFixed(2)]);
+          rawData.push(['Max Temp', maxTemp.toFixed(2)]);
+          rawData.push(['Avg Temp', avgTemp.toFixed(2)]);
+          rawData.push(['Total Records', logger.records.length]);
+          
+          const sheetName = `${file.name.replace('.csv', '').substring(0, 15)}_${logger.name}`.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '_');
           const rawSheet = XLSX.utils.aoa_to_sheet(rawData);
+          rawSheet['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 15 }];
           XLSX.utils.book_append_sheet(workbook, rawSheet, sheetName);
         });
       });
