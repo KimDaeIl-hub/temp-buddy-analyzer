@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { DataLogger, MeasurementSession } from "@/types/temperature";
+import { DataFile, ResultFilter } from "@/types/file";
 import { calculateSessionResults } from "@/utils/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,27 +7,86 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BarChart3, Clock, Droplets, Package } from "lucide-react";
 
 interface ResultsSummaryProps {
-  loggers: DataLogger[];
-  sessions: MeasurementSession[];
+  files: DataFile[];
+  resultFilters: ResultFilter[];
 }
 
-export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
-  const results = useMemo(() => {
-    const allResults: ReturnType<typeof calculateSessionResults> = [];
+export function ResultsSummary({ files, resultFilters }: ResultsSummaryProps) {
+  // Calculate all results from all files
+  const allResults = useMemo(() => {
+    const results: ReturnType<typeof calculateSessionResults> = [];
     
-    loggers.forEach(logger => {
-      if (logger.type && sessions.length > 0) {
-        const loggerResults = calculateSessionResults(logger, sessions);
-        allResults.push(...loggerResults);
-      }
+    files.forEach(file => {
+      file.loggers.forEach(logger => {
+        if (logger.type && file.sessions.length > 0) {
+          const loggerResults = calculateSessionResults(logger, file.sessions);
+          // Add file info to each result
+          loggerResults.forEach(r => {
+            (r as any).fileId = file.id;
+            (r as any).fileName = file.name;
+          });
+          results.push(...loggerResults);
+        }
+      });
     });
     
-    return allResults;
-  }, [loggers, sessions]);
+    return results;
+  }, [files]);
 
-  const configuredLoggers = loggers.filter(l => l.type !== null);
+  // Filter results based on resultFilters
+  const filteredResults = useMemo(() => {
+    if (resultFilters.length === 0) return allResults;
+    
+    return allResults.filter(result => {
+      const filter = resultFilters.find(
+        f => f.fileId === (result as any).fileId && 
+             f.loggerId === result.loggerId && 
+             f.sessionId === result.sessionId
+      );
+      return filter ? filter.enabled : true;
+    });
+  }, [allResults, resultFilters]);
 
-  if (configuredLoggers.length === 0) {
+  // Get all configured loggers count (filtered)
+  const configuredLoggersCount = useMemo(() => {
+    const uniqueLoggers = new Set<string>();
+    filteredResults.forEach(r => uniqueLoggers.add(`${(r as any).fileId}-${r.loggerId}`));
+    return uniqueLoggers.size;
+  }, [filteredResults]);
+
+  // Get unique sessions count (filtered)
+  const sessionsCount = useMemo(() => {
+    const uniqueSessions = new Set<string>();
+    filteredResults.forEach(r => uniqueSessions.add(`${(r as any).fileId}-${r.sessionId}`));
+    return uniqueSessions.size;
+  }, [filteredResults]);
+
+  // Get hotwater and product loggers count (filtered)
+  const hotwaterCount = useMemo(() => {
+    const unique = new Set<string>();
+    filteredResults.filter(r => r.loggerType === 'hotwater').forEach(r => unique.add(`${(r as any).fileId}-${r.loggerId}`));
+    return unique.size;
+  }, [filteredResults]);
+
+  const productCount = useMemo(() => {
+    const unique = new Set<string>();
+    filteredResults.filter(r => r.loggerType === 'product').forEach(r => unique.add(`${(r as any).fileId}-${r.loggerId}`));
+    return unique.size;
+  }, [filteredResults]);
+
+  const totalLoggers = files.reduce((sum, f) => sum + f.loggers.length, 0);
+
+  if (totalLoggers === 0) {
+    return (
+      <Card className="bg-card">
+        <CardContent className="py-8 text-center text-muted-foreground">
+          CSV 파일을 업로드하세요
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (configuredLoggersCount === 0) {
     return (
       <Card className="bg-card">
         <CardContent className="py-8 text-center text-muted-foreground">
@@ -37,7 +96,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
     );
   }
 
-  if (sessions.length === 0) {
+  if (sessionsCount === 0) {
     return (
       <Card className="bg-card">
         <CardContent className="py-8 text-center text-muted-foreground">
@@ -59,7 +118,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">총 데이터로거</p>
-                <p className="text-2xl font-bold">{loggers.length}</p>
+                <p className="text-2xl font-bold">{configuredLoggersCount}</p>
               </div>
             </div>
           </CardContent>
@@ -73,9 +132,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">열수 측정</p>
-                <p className="text-2xl font-bold">
-                  {configuredLoggers.filter(l => l.type === 'hotwater').length}
-                </p>
+                <p className="text-2xl font-bold">{hotwaterCount}</p>
               </div>
             </div>
           </CardContent>
@@ -89,9 +146,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">품온 측정</p>
-                <p className="text-2xl font-bold">
-                  {configuredLoggers.filter(l => l.type === 'product').length}
-                </p>
+                <p className="text-2xl font-bold">{productCount}</p>
               </div>
             </div>
           </CardContent>
@@ -105,7 +160,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">측정 회차</p>
-                <p className="text-2xl font-bold">{sessions.length}</p>
+                <p className="text-2xl font-bold">{sessionsCount}</p>
               </div>
             </div>
           </CardContent>
@@ -113,7 +168,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
       </div>
 
       {/* Hot Water Results */}
-      {results.some(r => r.loggerType === 'hotwater') && (
+      {filteredResults.some(r => r.loggerType === 'hotwater') && (
         <Card className="bg-card">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -125,6 +180,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {files.length > 1 && <TableHead>파일</TableHead>}
                   <TableHead>데이터로거</TableHead>
                   <TableHead>회차</TableHead>
                   <TableHead className="text-right">기준 온도</TableHead>
@@ -133,10 +189,17 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {results
+                {filteredResults
                   .filter(r => r.loggerType === 'hotwater')
                   .map((result, idx) => (
                     <TableRow key={`hotwater-${idx}`}>
+                      {files.length > 1 && (
+                        <TableCell>
+                          <Badge variant="secondary" className="text-xs">
+                            {(result as any).fileName}
+                          </Badge>
+                        </TableCell>
+                      )}
                       <TableCell className="font-medium">
                         {result.loggerName}
                       </TableCell>
@@ -161,7 +224,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
       )}
 
       {/* Product Temperature Results */}
-      {results.some(r => r.loggerType === 'product') && (
+      {filteredResults.some(r => r.loggerType === 'product') && (
         <Card className="bg-card">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -173,6 +236,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
             <Table>
               <TableHeader>
                 <TableRow>
+                  {files.length > 1 && <TableHead>파일</TableHead>}
                   <TableHead>데이터로거</TableHead>
                   <TableHead>회차</TableHead>
                   <TableHead className="text-right">평균 온도 (≥63℃)</TableHead>
@@ -181,15 +245,21 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {results
+                {filteredResults
                   .filter(r => r.loggerType === 'product')
                   .map((result, idx) => {
                     const isSterilization = result.sterilizationType === 'sterilization';
                     const fValueLabel = isSterilization ? 'F121℃ 이상' : 'F63℃ 이상';
-                    const durationToShow = isSterilization ? result.f121Minutes : result.f63Minutes;
                     
                     return (
                       <TableRow key={`product-${idx}`}>
+                        {files.length > 1 && (
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              {(result as any).fileName}
+                            </Badge>
+                          </TableCell>
+                        )}
                         <TableCell className="font-medium">
                           {result.loggerName}
                         </TableCell>
