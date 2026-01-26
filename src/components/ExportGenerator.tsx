@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { DataFile, ResultFilter } from "@/types/file";
+import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { AnalysisGroup, AnalysisGroupResult } from "@/types/analysis";
 import { calculateSessionResults, getRecordsInSession, calculateProductResults, calculateHotWaterResults } from "@/utils/calculations";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,17 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import html2canvas from "html2canvas";
 import * as XLSX from "xlsx";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
+} from "recharts";
 
 interface ExportGeneratorProps {
   files: DataFile[];
@@ -105,17 +117,14 @@ function calculateGroupResult(
   let totalFValue = 0;
 
   group.items.forEach(item => {
-    // Find logger and session across all files using composite ID
     let logger = null;
     let session = null;
     
-    // Parse composite ID to find correct file
     const [fileId, originalLoggerId] = item.loggerId.includes('::') 
       ? item.loggerId.split('::') 
       : [null, item.loggerId];
     
     for (const file of files) {
-      // Match by composite ID or fallback to original ID
       if (fileId && file.id !== fileId) continue;
       
       const foundLogger = file.loggers.find(l => l.id === originalLoggerId || l.id === item.loggerId);
@@ -137,7 +146,11 @@ function calculateGroupResult(
     let fValue = 0;
 
     if (logger.type === 'hotwater') {
-      const setTemp = session.setTemperature || logger.setTemperature || 0;
+      // Get logger-specific temperature
+      let setTemp = session.setTemperature || logger.setTemperature || 0;
+      if (session.loggerSetTemperatures && session.loggerSetTemperatures[logger.id] !== undefined) {
+        setTemp = session.loggerSetTemperatures[logger.id];
+      }
       const result = calculateHotWaterResults(sessionRecords, setTemp);
       avgTemp = result.averageTemp;
       duration = result.durationMinutes;
@@ -187,6 +200,8 @@ function calculateGroupResult(
   };
 }
 
+const CHART_COLORS = ['#0ea5e9', '#22c55e', '#f97316', '#a855f7', '#ef4444', '#06b6d4'];
+
 export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef, inline = false }: ExportGeneratorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -196,6 +211,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
     facilityName: "",
     validationNotes: "",
   });
+  const filteredChartRef = useRef<HTMLDivElement>(null);
 
   // Get all loggers and sessions
   const allLoggers = files.flatMap(f => f.loggers);
@@ -204,7 +220,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
   const totalSessions = allSessions.length;
 
   // Filter results based on resultFilters
-  const getFilteredResults = () => {
+  const getFilteredResults = useCallback(() => {
     const results: ReturnType<typeof calculateSessionResults> = [];
     
     files.forEach(file => {
@@ -214,7 +230,6 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         const loggerResults = calculateSessionResults(logger, file.sessions);
         
         loggerResults.forEach(result => {
-          // Check if this result passes the filter
           const isEnabled = resultFilters.length === 0 || resultFilters.some(
             f => f.fileId === file.id && 
                  f.loggerId === logger.id && 
@@ -230,7 +245,165 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
     });
     
     return results;
-  };
+  }, [files, resultFilters]);
+
+  // Get filtered chart data for specific logger and session
+  const getFilteredChartData = useCallback(() => {
+    const filteredData: { 
+      logger: DataLogger; 
+      session: MeasurementSession; 
+      file: DataFile;
+      records: any[];
+    }[] = [];
+
+    files.forEach(file => {
+      file.loggers.forEach(logger => {
+        if (!logger.type) return;
+        
+        file.sessions.forEach(session => {
+          const isEnabled = resultFilters.length === 0 || resultFilters.some(
+            f => f.fileId === file.id && 
+                 f.loggerId === logger.id && 
+                 f.sessionId === session.id &&
+                 f.enabled
+          );
+          
+          if (isEnabled) {
+            const records = getRecordsInSession(logger.records, session);
+            if (records.length > 0) {
+              filteredData.push({
+                logger,
+                session,
+                file,
+                records
+              });
+            }
+          }
+        });
+      });
+    });
+
+    return filteredData;
+  }, [files, resultFilters]);
+
+  // Render mini charts for filtered data
+  const renderFilteredCharts = useCallback(async (pdf: jsPDF, yPos: number, margin: number, pageWidth: number): Promise<number> => {
+    const filteredData = getFilteredChartData();
+    
+    if (filteredData.length === 0) return yPos;
+
+    // Group by file and session
+    const groupedByFileSession = new Map<string, typeof filteredData>();
+    filteredData.forEach(item => {
+      const key = `${item.file.id}-${item.session.id}`;
+      if (!groupedByFileSession.has(key)) {
+        groupedByFileSession.set(key, []);
+      }
+      groupedByFileSession.get(key)!.push(item);
+    });
+
+    for (const [key, items] of groupedByFileSession) {
+      const firstItem = items[0];
+      const session = firstItem.session;
+      const file = firstItem.file;
+      
+      // Create chart container
+      const chartContainer = document.createElement('div');
+      chartContainer.style.width = '600px';
+      chartContainer.style.height = '250px';
+      chartContainer.style.position = 'absolute';
+      chartContainer.style.left = '-9999px';
+      chartContainer.style.backgroundColor = 'white';
+      document.body.appendChild(chartContainer);
+
+      // Prepare data
+      const chartData: any[] = [];
+      const maxLength = Math.max(...items.map(item => item.records.length));
+      
+      for (let i = 0; i < maxLength; i++) {
+        const dataPoint: any = { index: i };
+        items.forEach((item, idx) => {
+          if (item.records[i]) {
+            dataPoint[`temp${idx}`] = item.records[i].temperature;
+            if (item.records[i].fValue !== undefined) {
+              dataPoint[`fvalue${idx}`] = item.records[i].fValue;
+            }
+          }
+        });
+        if (i % 5 === 0) { // Sample every 5th point for smaller charts
+          chartData.push(dataPoint);
+        }
+      }
+
+      // Render chart using React
+      const { createRoot } = await import('react-dom/client');
+      const root = createRoot(chartContainer);
+      
+      await new Promise<void>((resolve) => {
+        root.render(
+          <div style={{ width: '100%', height: '100%', padding: '10px', backgroundColor: 'white' }}>
+            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>
+              {sanitizeForPDF(files.length > 1 ? `[${file.name.replace('.csv', '')}] ${session.name}` : session.name)}
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="index" tick={{ fontSize: 10 }} />
+                <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10 }} />
+                {items.map((item, idx) => (
+                  <Line
+                    key={idx}
+                    type="monotone"
+                    dataKey={`temp${idx}`}
+                    stroke={CHART_COLORS[idx % CHART_COLORS.length]}
+                    strokeWidth={1.5}
+                    dot={false}
+                    name={sanitizeForPDF(item.logger.name)}
+                  />
+                ))}
+                <Legend wrapperStyle={{ fontSize: '10px' }} />
+                <Tooltip 
+                  contentStyle={{ fontSize: '10px' }}
+                  formatter={(value: number) => [`${value.toFixed(1)}°C`]}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        );
+        
+        setTimeout(resolve, 200);
+      });
+
+      // Capture to canvas
+      try {
+        const canvas = await html2canvas(chartContainer, {
+          backgroundColor: '#ffffff',
+          scale: 2,
+        });
+        
+        const imgData = canvas.toDataURL('image/png');
+        const imgWidth = (pageWidth - margin * 2) * 0.8;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        
+        // Check if need new page
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        if (yPos + imgHeight + 20 > pageHeight - margin) {
+          pdf.addPage();
+          yPos = margin;
+        }
+        
+        pdf.addImage(imgData, 'PNG', margin + (pageWidth - margin * 2 - imgWidth) / 2, yPos, imgWidth, imgHeight);
+        yPos += imgHeight + 10;
+      } catch (error) {
+        console.error('Failed to capture filtered chart:', error);
+      }
+
+      root.unmount();
+      document.body.removeChild(chartContainer);
+    }
+
+    return yPos;
+  }, [files, getFilteredChartData]);
 
   const generateExcel = async () => {
     setIsGenerating(true);
@@ -239,51 +412,56 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       const workbook = XLSX.utils.book_new();
       const allResults = getFilteredResults();
       
-      // ===== 1. Summary Sheet (styled like PDF) =====
-      const summaryData: any[][] = [
-        ['VALIDATION REPORT'],
-        [''],
-        ['Report Information'],
-        ['Issue Date', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })],
-        ['Product Name', settings.productName || '-'],
-        ['Operator', settings.operatorName || '-'],
-        ['Facility', settings.facilityName || '-'],
-        [''],
-        ['Data Summary'],
-        ['Total Files', files.length],
-        ['Total Data Loggers', totalLoggers],
-        ['Hot Water Loggers', allLoggers.filter(l => l.type === 'hotwater').length],
-        ['Product Temp Loggers', allLoggers.filter(l => l.type === 'product').length],
-        ['Total Sessions', totalSessions],
-        [''],
-      ];
+      // ===== 1. Summary Sheet (PDF 스타일로 개선) =====
+      const summaryData: any[][] = [];
+      
+      // Title with styling info
+      summaryData.push(['']);
+      summaryData.push(['   VALIDATION REPORT']);
+      summaryData.push(['']);
+      summaryData.push(['═══════════════════════════════════════════════════════════════']);
+      summaryData.push(['']);
+      summaryData.push(['   REPORT INFORMATION']);
+      summaryData.push(['   ─────────────────────────────────────────────────────────────']);
+      summaryData.push(['   Issue Date:', new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })]);
+      summaryData.push(['   Product Name:', settings.productName || '(Not specified)']);
+      summaryData.push(['   Operator:', settings.operatorName || '(Not specified)']);
+      summaryData.push(['   Facility:', settings.facilityName || '(Not specified)']);
+      summaryData.push(['']);
+      summaryData.push(['   DATA SUMMARY']);
+      summaryData.push(['   ─────────────────────────────────────────────────────────────']);
+      summaryData.push(['   Total Files:', files.length]);
+      summaryData.push(['   Total Data Loggers:', totalLoggers]);
+      summaryData.push(['   Hot Water Loggers:', allLoggers.filter(l => l.type === 'hotwater').length]);
+      summaryData.push(['   Product Temp Loggers:', allLoggers.filter(l => l.type === 'product').length]);
+      summaryData.push(['   Total Sessions:', totalSessions]);
+      summaryData.push(['']);
       
       if (settings.validationNotes) {
-        summaryData.push(['Verification Notes']);
-        summaryData.push([settings.validationNotes]);
+        summaryData.push(['   VERIFICATION NOTES']);
+        summaryData.push(['   ─────────────────────────────────────────────────────────────']);
+        summaryData.push([`   ${settings.validationNotes}`]);
+        summaryData.push(['']);
       }
       
+      summaryData.push(['═══════════════════════════════════════════════════════════════']);
+      
       const summarySheet = XLSX.utils.aoa_to_sheet(summaryData);
-      
-      // Set column widths for better readability
-      summarySheet['!cols'] = [{ wch: 25 }, { wch: 40 }];
-      
-      // Merge title cell
-      summarySheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
-      
+      summarySheet['!cols'] = [{ wch: 25 }, { wch: 50 }];
       XLSX.utils.book_append_sheet(workbook, summarySheet, 'Summary');
       
       // ===== 2. Hot Water Results Sheet =====
       const hotwaterResults = allResults.filter(r => r.loggerType === 'hotwater');
       if (hotwaterResults.length > 0) {
-        const hwData: any[][] = [
-          ['HOT WATER MEASUREMENT RESULTS'],
-          [''],
-          ['File', 'Logger Name', 'Session', 'Set Temp (°C)', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'Status'],
-        ];
+        const hwData: any[][] = [];
+        hwData.push(['']);
+        hwData.push(['   HOT WATER MEASUREMENT RESULTS']);
+        hwData.push(['═══════════════════════════════════════════════════════════════════════════════════════════════════']);
+        hwData.push(['']);
+        hwData.push(['   File', 'Logger Name', 'Session', 'Set Temp (°C)', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'Status']);
+        hwData.push(['   ────────────', '────────────────────', '────────────', '────────────', '────────────', '────────────', '────────────', '────────']);
         
         hotwaterResults.forEach(r => {
-          // Find file name
           let fileName = '-';
           for (const file of files) {
             const foundLogger = file.loggers.find(l => l.name === r.loggerName || l.id === r.loggerId);
@@ -294,10 +472,10 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           }
           
           const threshold = r.threshold || 0;
-          const status = r.averageTemp >= threshold ? 'PASS' : 'FAIL';
+          const status = r.averageTemp >= threshold ? '✓ PASS' : '✗ FAIL';
           
           hwData.push([
-            fileName,
+            `   ${fileName}`,
             r.loggerName,
             r.sessionName,
             (threshold + 2.4).toFixed(1),
@@ -308,31 +486,36 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           ]);
         });
         
-        // Add summary row
         if (hotwaterResults.length > 1) {
           const avgTemp = hotwaterResults.reduce((sum, r) => sum + r.averageTemp, 0) / hotwaterResults.length;
           const totalDuration = hotwaterResults.reduce((sum, r) => sum + r.durationMinutes, 0);
-          hwData.push(['']);
-          hwData.push(['', '', 'AVERAGE/TOTAL', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), '']);
+          hwData.push(['   ────────────', '────────────────────', '────────────', '────────────', '────────────', '────────────', '────────────', '────────']);
+          hwData.push(['', '', '   SUMMARY', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), '']);
         }
         
+        hwData.push(['']);
+        hwData.push(['═══════════════════════════════════════════════════════════════════════════════════════════════════']);
+        
         const hwSheet = XLSX.utils.aoa_to_sheet(hwData);
-        hwSheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
-        hwSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 7 } }];
+        hwSheet['!cols'] = [
+          { wch: 18 }, { wch: 22 }, { wch: 15 }, { wch: 14 }, 
+          { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
+        ];
         XLSX.utils.book_append_sheet(workbook, hwSheet, 'Hot Water Results');
       }
       
       // ===== 3. Product Temperature Results Sheet =====
       const productResults = allResults.filter(r => r.loggerType === 'product');
       if (productResults.length > 0) {
-        const prodData: any[][] = [
-          ['PRODUCT TEMPERATURE MEASUREMENT RESULTS'],
-          [''],
-          ['File', 'Logger Name', 'Session', 'Type', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'F-Value', 'Status'],
-        ];
+        const prodData: any[][] = [];
+        prodData.push(['']);
+        prodData.push(['   PRODUCT TEMPERATURE MEASUREMENT RESULTS']);
+        prodData.push(['═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════']);
+        prodData.push(['']);
+        prodData.push(['   File', 'Logger Name', 'Session', 'Type', 'Threshold (°C)', 'Avg Temp (°C)', 'Duration (min)', 'F-Value', 'Status']);
+        prodData.push(['   ────────────', '──────────────────', '──────────', '──────────────────────', '────────────', '────────────', '────────────', '────────────', '────────']);
         
         productResults.forEach(r => {
-          // Find file name
           let fileName = '-';
           for (const file of files) {
             const foundLogger = file.loggers.find(l => l.name === r.loggerName || l.id === r.loggerId);
@@ -343,13 +526,13 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           }
           
           const isSterilization = r.sterilizationType === 'sterilization';
-          const fValueType = isSterilization ? 'F121°C (Sterilization)' : 'F63°C (Pasteurization)';
+          const fValueType = isSterilization ? 'Sterilization (F121°C)' : 'Pasteurization (F63°C)';
           const threshold = isSterilization ? 121 : 63;
           const fValue = r.sessionFValue || 0;
-          const status = fValue > 0 ? 'PASS' : 'FAIL';
+          const status = fValue > 0 ? '✓ PASS' : '✗ FAIL';
           
           prodData.push([
-            fileName,
+            `   ${fileName}`,
             r.loggerName,
             r.sessionName,
             fValueType,
@@ -361,27 +544,32 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           ]);
         });
         
-        // Add summary row
         if (productResults.length > 1) {
           const avgTemp = productResults.reduce((sum, r) => sum + r.averageTemp, 0) / productResults.length;
           const totalDuration = productResults.reduce((sum, r) => sum + r.durationMinutes, 0);
           const avgFValue = productResults.reduce((sum, r) => sum + (r.sessionFValue || 0), 0) / productResults.length;
-          prodData.push(['']);
-          prodData.push(['', '', 'AVERAGE/TOTAL', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), avgFValue.toFixed(4), '']);
+          prodData.push(['   ────────────', '──────────────────', '──────────', '──────────────────────', '────────────', '────────────', '────────────', '────────────', '────────']);
+          prodData.push(['', '', '   SUMMARY', '', '', avgTemp.toFixed(2), totalDuration.toFixed(1), avgFValue.toFixed(4), '']);
         }
         
+        prodData.push(['']);
+        prodData.push(['═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════']);
+        
         const prodSheet = XLSX.utils.aoa_to_sheet(prodData);
-        prodSheet['!cols'] = [{ wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 22 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }];
-        prodSheet['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
+        prodSheet['!cols'] = [
+          { wch: 18 }, { wch: 20 }, { wch: 14 }, { wch: 24 }, 
+          { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }
+        ];
         XLSX.utils.book_append_sheet(workbook, prodSheet, 'Product Temp Results');
       }
       
       // ===== 4. Analysis Groups Sheet =====
       if (analysisGroups.length > 0) {
-        const groupData: any[][] = [
-          ['CUSTOM ANALYSIS GROUPS'],
-          [''],
-        ];
+        const groupData: any[][] = [];
+        groupData.push(['']);
+        groupData.push(['   CUSTOM ANALYSIS GROUPS']);
+        groupData.push(['═══════════════════════════════════════════════════════════════════════════════════════']);
+        groupData.push(['']);
         
         analysisGroups.forEach((group, groupIdx) => {
           const result = calculateGroupResult(group, files);
@@ -391,14 +579,16 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           const avgDuration = result.totalDurationMinutes / result.itemResults.length;
           const avgFValue = result.totalFValue / result.itemResults.length;
           
-          groupData.push([`Group ${groupIdx + 1}: ${group.name}`]);
-          groupData.push(['Summary:', '', `Avg Temp: ${avgTemp.toFixed(2)}°C`, `Avg Duration: ${avgDuration.toFixed(1)} min`, `Avg F-Value: ${avgFValue.toFixed(4)}`]);
+          groupData.push([`   ▶ GROUP ${groupIdx + 1}: ${group.name}`]);
+          groupData.push(['   ─────────────────────────────────────────────────────────────────────────────────']);
+          groupData.push([`   Summary:`, `Avg Temp: ${avgTemp.toFixed(2)}°C`, `Avg Duration: ${avgDuration.toFixed(1)} min`, `Avg F-Value: ${avgFValue.toFixed(4)}`]);
           groupData.push(['']);
-          groupData.push(['Logger', 'Session', 'Avg Temp (°C)', 'Duration (min)', 'F-Value']);
+          groupData.push(['   Logger', 'Session', 'Avg Temp (°C)', 'Duration (min)', 'F-Value']);
+          groupData.push(['   ──────────────────────', '──────────────', '────────────', '────────────', '────────────']);
           
           result.itemResults.forEach(item => {
             groupData.push([
-              item.loggerName,
+              `   ${item.loggerName}`,
               item.sessionName,
               item.averageTemp.toFixed(2),
               item.durationMinutes.toFixed(1),
@@ -410,50 +600,57 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           groupData.push(['']);
         });
         
+        groupData.push(['═══════════════════════════════════════════════════════════════════════════════════════']);
+        
         const groupSheet = XLSX.utils.aoa_to_sheet(groupData);
-        groupSheet['!cols'] = [{ wch: 25 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
+        groupSheet['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 18 }, { wch: 18 }, { wch: 15 }];
         XLSX.utils.book_append_sheet(workbook, groupSheet, 'Analysis Groups');
       }
       
-      // ===== 5. Raw Data Sheets per Logger =====
+      // ===== 5. Raw Data Sheets =====
       files.forEach(file => {
         file.loggers.forEach(logger => {
           if (logger.records.length === 0) return;
           
-          const rawData: any[][] = [
-            [`RAW DATA: ${logger.name}`],
-            [`File: ${file.name}`],
-            [`Type: ${logger.type === 'hotwater' ? 'Hot Water' : logger.type === 'product' ? 'Product Temp' : 'Not Configured'}`],
-            [''],
-            ['Index', 'Date', 'Time', 'Temperature (°C)', 'F-Value'],
-          ];
+          const rawData: any[][] = [];
+          rawData.push(['']);
+          rawData.push([`   RAW DATA: ${logger.name}`]);
+          rawData.push([`   File: ${file.name}`]);
+          rawData.push([`   Type: ${logger.type === 'hotwater' ? 'Hot Water' : logger.type === 'product' ? 'Product Temp' : 'Not Configured'}`]);
+          rawData.push(['═══════════════════════════════════════════════════════════════════════']);
+          rawData.push(['']);
+          rawData.push(['   #', 'Date', 'Time', 'Temperature (°C)', 'F-Value']);
+          rawData.push(['   ────', '────────────', '──────────', '────────────────', '────────────']);
           
           logger.records.forEach((r, idx) => {
             rawData.push([
-              idx + 1,
+              `   ${idx + 1}`,
               r.date,
               r.time,
-              r.temperature,
+              r.temperature.toFixed(2),
               r.fValue !== undefined ? r.fValue.toFixed(6) : '-'
             ]);
           });
           
-          // Add statistics
+          // Statistics
           const temps = logger.records.map(r => r.temperature);
           const minTemp = Math.min(...temps);
           const maxTemp = Math.max(...temps);
           const avgTemp = temps.reduce((a, b) => a + b, 0) / temps.length;
           
           rawData.push(['']);
-          rawData.push(['Statistics']);
-          rawData.push(['Min Temp', minTemp.toFixed(2)]);
-          rawData.push(['Max Temp', maxTemp.toFixed(2)]);
-          rawData.push(['Avg Temp', avgTemp.toFixed(2)]);
-          rawData.push(['Total Records', logger.records.length]);
+          rawData.push(['═══════════════════════════════════════════════════════════════════════']);
+          rawData.push(['   STATISTICS']);
+          rawData.push(['   ─────────────────────────────────────────────────────────────────────']);
+          rawData.push(['   Min Temperature:', '', '', minTemp.toFixed(2) + ' °C']);
+          rawData.push(['   Max Temperature:', '', '', maxTemp.toFixed(2) + ' °C']);
+          rawData.push(['   Avg Temperature:', '', '', avgTemp.toFixed(2) + ' °C']);
+          rawData.push(['   Total Records:', '', '', logger.records.length.toString()]);
+          rawData.push(['═══════════════════════════════════════════════════════════════════════']);
           
           const sheetName = `${file.name.replace('.csv', '').substring(0, 15)}_${logger.name}`.substring(0, 31).replace(/[\\\/\?\*\[\]]/g, '_');
           const rawSheet = XLSX.utils.aoa_to_sheet(rawData);
-          rawSheet['!cols'] = [{ wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 15 }, { wch: 15 }];
+          rawSheet['!cols'] = [{ wch: 10 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 15 }];
           XLSX.utils.book_append_sheet(workbook, rawSheet, sheetName);
         });
       });
@@ -581,31 +778,16 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         yPos += 8;
       }
 
-      // Chart
-      if (chartRef.current) {
-        checkNewPage(80);
-        pdf.setFontSize(12);
-        pdf.setFont("helvetica", "bold");
-        pdf.setTextColor(59, 130, 246);
-        pdf.text("III. TEMPERATURE PROFILE", margin, yPos);
-        yPos += 8;
+      // Filtered Charts Section
+      checkNewPage(80);
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(59, 130, 246);
+      pdf.text("III. TEMPERATURE PROFILES (Selected Data)", margin, yPos);
+      yPos += 8;
 
-        try {
-          const canvas = await html2canvas(chartRef.current, {
-            backgroundColor: "#ffffff",
-            scale: 2,
-          });
-          const imgData = canvas.toDataURL("image/png");
-          const imgWidth = pageWidth - margin * 2;
-          const imgHeight = (canvas.height * imgWidth) / canvas.width;
-          
-          checkNewPage(imgHeight + 10);
-          pdf.addImage(imgData, "PNG", margin, yPos, imgWidth, Math.min(imgHeight, 80));
-          yPos += Math.min(imgHeight, 80) + 10;
-        } catch (error) {
-          console.error("Failed to capture chart:", error);
-        }
-      }
+      // Render filtered charts
+      yPos = await renderFilteredCharts(pdf, yPos, margin, pageWidth);
 
       // Results
       const allResults = getFilteredResults();
@@ -789,6 +971,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
   };
 
   const isReady = files.length > 0 && totalSessions > 0;
+  const filteredCount = resultFilters.filter(f => f.enabled).length;
 
   if (inline) {
     return (
@@ -866,28 +1049,32 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
               <div className="space-y-2">
                 <div className="text-xs font-medium text-muted-foreground">포함 내용</div>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">온도 그래프</Badge>
-                  <Badge variant="secondary">회차별 결과</Badge>
-                  <Badge variant="secondary">열수 분석</Badge>
-                  <Badge variant="secondary">품온 분석</Badge>
+                  <Badge variant="secondary" className="whitespace-nowrap">선택된 온도 그래프</Badge>
+                  <Badge variant="secondary" className="whitespace-nowrap">회차별 결과</Badge>
+                  <Badge variant="secondary" className="whitespace-nowrap">열수 분석</Badge>
+                  <Badge variant="secondary" className="whitespace-nowrap">품온 분석</Badge>
                   {analysisGroups.length > 0 && (
-                    <Badge variant="secondary">분석 그룹 ({analysisGroups.length})</Badge>
+                    <Badge variant="secondary" className="whitespace-nowrap">분석 그룹 ({analysisGroups.length})</Badge>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3 text-center">
-                <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">파일</div>
-                  <div className="text-xl font-bold text-primary">{files.length}</div>
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <div className="text-[10px] text-muted-foreground whitespace-nowrap">파일</div>
+                  <div className="text-lg font-bold text-primary">{files.length}</div>
                 </div>
-                <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">로거</div>
-                  <div className="text-xl font-bold text-primary">{totalLoggers}</div>
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <div className="text-[10px] text-muted-foreground whitespace-nowrap">로거</div>
+                  <div className="text-lg font-bold text-primary">{totalLoggers}</div>
                 </div>
-                <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">회차</div>
-                  <div className="text-xl font-bold text-primary">{totalSessions}</div>
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <div className="text-[10px] text-muted-foreground whitespace-nowrap">회차</div>
+                  <div className="text-lg font-bold text-primary">{totalSessions}</div>
+                </div>
+                <div className="p-2 rounded-lg bg-primary/10">
+                  <div className="text-[10px] text-muted-foreground whitespace-nowrap">선택</div>
+                  <div className="text-lg font-bold text-primary">{filteredCount || 'All'}</div>
                 </div>
               </div>
             </CardContent>

@@ -22,7 +22,8 @@ export interface MeasurementSession {
   name: string;
   startTime: Date;
   endTime: Date;
-  setTemperature?: number; // 회차별 열수 설정 온도
+  setTemperature?: number; // 기본 열수 설정 온도 (deprecated - use loggerSetTemperatures)
+  loggerSetTemperatures?: Record<string, number>; // 로거별 열수 설정 온도
 }
 
 export interface CalculationResult {
