@@ -295,7 +295,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
     });
   };
 
-  // Render mini charts for filtered data
+  // Render mini charts for filtered data - using ALL session data
   const renderFilteredCharts = useCallback(async (pdf: jsPDF, yPos: number, margin: number, pageWidth: number): Promise<number> => {
     const filteredData = getFilteredChartData();
     
@@ -318,43 +318,75 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       
       // Create chart container - larger for better quality
       const chartContainer = document.createElement('div');
-      chartContainer.style.width = '800px';
-      chartContainer.style.height = '350px';
+      chartContainer.style.width = '900px';
+      chartContainer.style.height = '400px';
       chartContainer.style.position = 'absolute';
       chartContainer.style.left = '-9999px';
       chartContainer.style.backgroundColor = 'white';
       document.body.appendChild(chartContainer);
 
-      // Prepare data with ALL records (no sampling to show full session)
+      // Prepare chart data - use ALL records for accurate visualization
       const chartData: any[] = [];
       const maxLength = Math.max(...items.map(item => item.records.length));
       
-      // Determine sampling rate based on data size (sample every Nth point for readability)
-      const sampleRate = maxLength > 500 ? Math.ceil(maxLength / 200) : 
-                         maxLength > 200 ? Math.ceil(maxLength / 100) : 1;
+      // Calculate proper sample rate to show full session while keeping chart readable
+      // Aim for 100-150 data points for optimal visualization
+      const targetPoints = 120;
+      const sampleRate = Math.max(1, Math.ceil(maxLength / targetPoints));
       
-      for (let i = 0; i < maxLength; i++) {
-        if (i % sampleRate === 0 || i === maxLength - 1) {
-          const dataPoint: any = { index: i };
-          
-          // Use actual timestamp from first item with data at this index
-          let timestamp: Date | null = null;
-          items.forEach((item, idx) => {
-            if (item.records[i]) {
-              dataPoint[`temp${idx}`] = item.records[i].temperature;
-              if (item.records[i].fValue !== undefined) {
-                dataPoint[`fvalue${idx}`] = item.records[i].fValue;
-              }
-              if (!timestamp && item.records[i].timestamp) {
-                timestamp = item.records[i].timestamp;
-              }
+      for (let i = 0; i < maxLength; i += sampleRate) {
+        const dataPoint: any = { index: i };
+        
+        // Use actual timestamp from first item with data at this index
+        let timestamp: Date | null = null;
+        items.forEach((item, idx) => {
+          if (item.records[i]) {
+            dataPoint[`temp${idx}`] = item.records[i].temperature;
+            if (item.records[i].fValue !== undefined) {
+              dataPoint[`fvalue${idx}`] = item.records[i].fValue;
             }
-          });
-          
-          dataPoint.time = timestamp ? formatTimeForChart(timestamp) : `${i}`;
-          chartData.push(dataPoint);
-        }
+            if (!timestamp && item.records[i].timestamp) {
+              timestamp = item.records[i].timestamp;
+            }
+          }
+        });
+        
+        dataPoint.time = timestamp ? formatTimeForChart(timestamp) : `${i}`;
+        chartData.push(dataPoint);
       }
+      
+      // Always include the last data point
+      if (maxLength > 0 && (maxLength - 1) % sampleRate !== 0) {
+        const lastDataPoint: any = { index: maxLength - 1 };
+        let lastTimestamp: Date | null = null;
+        items.forEach((item, idx) => {
+          const lastIdx = item.records.length - 1;
+          if (item.records[lastIdx]) {
+            lastDataPoint[`temp${idx}`] = item.records[lastIdx].temperature;
+            if (item.records[lastIdx].fValue !== undefined) {
+              lastDataPoint[`fvalue${idx}`] = item.records[lastIdx].fValue;
+            }
+            if (!lastTimestamp && item.records[lastIdx].timestamp) {
+              lastTimestamp = item.records[lastIdx].timestamp;
+            }
+          }
+        });
+        lastDataPoint.time = lastTimestamp ? formatTimeForChart(lastTimestamp) : `${maxLength - 1}`;
+        chartData.push(lastDataPoint);
+      }
+
+      // Calculate Y-axis domain based on actual data
+      let minTemp = Infinity;
+      let maxTemp = -Infinity;
+      items.forEach(item => {
+        item.records.forEach(r => {
+          minTemp = Math.min(minTemp, r.temperature);
+          maxTemp = Math.max(maxTemp, r.temperature);
+        });
+      });
+      const yPadding = (maxTemp - minTemp) * 0.1;
+      const yMin = Math.floor(minTemp - yPadding);
+      const yMax = Math.ceil(maxTemp + yPadding);
 
       // Render chart using React
       const { createRoot } = await import('react-dom/client');
@@ -362,25 +394,25 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       
       await new Promise<void>((resolve) => {
         root.render(
-          <div style={{ width: '100%', height: '100%', padding: '15px', backgroundColor: 'white' }}>
+          <div style={{ width: '100%', height: '100%', padding: '20px', backgroundColor: 'white' }}>
             <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px', textAlign: 'center' }}>
               {sanitizeForPDF(files.length > 1 ? `[${file.name.replace('.csv', '')}] ${session.name}` : session.name)}
             </div>
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 30 }}>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 40 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis 
                   dataKey="time" 
-                  tick={{ fontSize: 9 }} 
+                  tick={{ fontSize: 8 }} 
                   angle={-45}
                   textAnchor="end"
-                  height={50}
-                  interval={Math.floor(chartData.length / 8)}
+                  height={60}
+                  interval={Math.max(0, Math.floor(chartData.length / 10) - 1)}
                 />
                 <YAxis 
-                  domain={['auto', 'auto']} 
+                  domain={[yMin, yMax]} 
                   tick={{ fontSize: 10 }}
-                  label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', fontSize: 10 }}
+                  label={{ value: 'Temperature (\u00B0C)', angle: -90, position: 'insideLeft', fontSize: 10 }}
                 />
                 {items.map((item, idx) => (
                   <Line
@@ -397,21 +429,21 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                 <Tooltip 
                   contentStyle={{ fontSize: '11px' }}
-                  formatter={(value: number) => [`${value.toFixed(1)}°C`]}
+                  formatter={(value: number) => [`${value.toFixed(1)}\u00B0C`]}
                 />
               </LineChart>
             </ResponsiveContainer>
           </div>
         );
         
-        setTimeout(resolve, 300);
+        setTimeout(resolve, 400);
       });
 
-      // Capture to canvas
+      // Capture to canvas with higher resolution
       try {
         const canvas = await html2canvas(chartContainer, {
           backgroundColor: '#ffffff',
-          scale: 2,
+          scale: 2.5,
         });
         
         const imgData = canvas.toDataURL('image/png');
@@ -426,7 +458,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         }
         
         pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
-        yPos += imgHeight + 10;
+        yPos += imgHeight + 15;
       } catch (error) {
         console.error('Failed to capture filtered chart:', error);
       }
@@ -811,17 +843,6 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         yPos += 8;
       }
 
-      // Filtered Charts Section
-      checkNewPage(80);
-      pdf.setFontSize(12);
-      pdf.setFont("helvetica", "bold");
-      pdf.setTextColor(59, 130, 246);
-      pdf.text("III. TEMPERATURE PROFILES", margin, yPos);
-      yPos += 8;
-
-      // Render filtered charts
-      yPos = await renderFilteredCharts(pdf, yPos, margin, pageWidth);
-
       // Results
       const allResults = getFilteredResults();
       
@@ -829,7 +850,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       pdf.setFontSize(12);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(59, 130, 246);
-      pdf.text("IV. SESSION ANALYSIS RESULTS", margin, yPos);
+      pdf.text("III. SESSION ANALYSIS RESULTS", margin, yPos);
       yPos += 8;
 
       // Hot Water
@@ -908,7 +929,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           pdf.setFontSize(12);
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(59, 130, 246);
-          pdf.text("V. CUSTOM ANALYSIS GROUPS", margin, yPos);
+          pdf.text("IV. CUSTOM ANALYSIS GROUPS", margin, yPos);
           yPos += 8;
 
           groupsWithResults.forEach(({ group, result }) => {
@@ -956,13 +977,13 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         }
       }
 
-      // Notes
+      // Notes (before charts)
       if (settings.validationNotes) {
         checkNewPage(40);
         pdf.setFontSize(12);
         pdf.setFont("helvetica", "bold");
         pdf.setTextColor(59, 130, 246);
-        const sectionNum = analysisGroups.length > 0 ? "VI" : "V";
+        const sectionNum = analysisGroups.length > 0 ? "V" : "IV";
         pdf.text(`${sectionNum}. VERIFICATION NOTES`, margin, yPos);
         yPos += 8;
 
@@ -972,7 +993,22 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         
         const splitNotes = pdf.splitTextToSize(settings.validationNotes, pageWidth - margin * 2);
         pdf.text(splitNotes, margin, yPos);
+        yPos += splitNotes.length * 5 + 10;
       }
+
+      // Temperature Profile Charts (at the end)
+      checkNewPage(80);
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "bold");
+      pdf.setTextColor(59, 130, 246);
+      const chartSectionNum = settings.validationNotes 
+        ? (analysisGroups.length > 0 ? "VI" : "V")
+        : (analysisGroups.length > 0 ? "V" : "IV");
+      pdf.text(`${chartSectionNum}. TEMPERATURE PROFILES`, margin, yPos);
+      yPos += 8;
+
+      // Render filtered charts
+      yPos = await renderFilteredCharts(pdf, yPos, margin, pageWidth);
 
       // Footer
       const pageCount = pdf.getNumberOfPages();

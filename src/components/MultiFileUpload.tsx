@@ -8,7 +8,7 @@ import { DataFile } from "@/types/file";
 
 interface MultiFileUploadProps {
   files: DataFile[];
-  onFilesChange: (files: DataFile[]) => void;
+  onFilesChange: (files: DataFile[], contents?: Map<string, string>) => void;
 }
 
 export function MultiFileUpload({ files, onFilesChange }: MultiFileUploadProps) {
@@ -18,6 +18,7 @@ export function MultiFileUpload({ files, onFilesChange }: MultiFileUploadProps) 
       if (!selectedFiles || selectedFiles.length === 0) return;
 
       const newFiles: DataFile[] = [];
+      const newContents = new Map<string, string>();
       
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
@@ -25,17 +26,28 @@ export function MultiFileUpload({ files, onFilesChange }: MultiFileUploadProps) 
         const loggers = parseCSVContent(content);
         
         if (loggers.length > 0) {
+          const fileId = `file-${Date.now()}-${i}`;
           newFiles.push({
-            id: `file-${Date.now()}-${i}`,
+            id: fileId,
             name: file.name,
             loggers,
             sessions: [],
             uploadedAt: new Date(),
           });
+          newContents.set(fileId, content);
         }
       }
       
-      onFilesChange([...files, ...newFiles]);
+      // Merge with existing contents
+      const allContents = new Map<string, string>();
+      files.forEach(f => {
+        // Keep existing file contents (not tracked in this component, will be handled by parent)
+      });
+      newContents.forEach((content, id) => {
+        allContents.set(id, content);
+      });
+      
+      onFilesChange([...files, ...newFiles], newContents);
       
       // Reset input
       event.target.value = '';
@@ -50,6 +62,7 @@ export function MultiFileUpload({ files, onFilesChange }: MultiFileUploadProps) 
       if (!droppedFiles || droppedFiles.length === 0) return;
 
       const newFiles: DataFile[] = [];
+      const newContents = new Map<string, string>();
       
       for (let i = 0; i < droppedFiles.length; i++) {
         const file = droppedFiles[i];
@@ -59,17 +72,19 @@ export function MultiFileUpload({ files, onFilesChange }: MultiFileUploadProps) 
         const loggers = parseCSVContent(content);
         
         if (loggers.length > 0) {
+          const fileId = `file-${Date.now()}-${i}`;
           newFiles.push({
-            id: `file-${Date.now()}-${i}`,
+            id: fileId,
             name: file.name,
             loggers,
             sessions: [],
             uploadedAt: new Date(),
           });
+          newContents.set(fileId, content);
         }
       }
       
-      onFilesChange([...files, ...newFiles]);
+      onFilesChange([...files, ...newFiles], newContents);
     },
     [files, onFilesChange]
   );
