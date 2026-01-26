@@ -1,10 +1,10 @@
 import { useMemo } from "react";
-import { DataLogger, MeasurementSession, CalculationResult } from "@/types/temperature";
-import { calculateSessionResults, getRecordsInSession } from "@/utils/calculations";
+import { DataLogger, MeasurementSession } from "@/types/temperature";
+import { calculateSessionResults } from "@/utils/calculations";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { BarChart3, Thermometer, Clock, TrendingUp, Droplets, Package } from "lucide-react";
+import { BarChart3, Clock, Droplets, Package } from "lucide-react";
 
 interface ResultsSummaryProps {
   loggers: DataLogger[];
@@ -13,7 +13,7 @@ interface ResultsSummaryProps {
 
 export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
   const results = useMemo(() => {
-    const allResults: CalculationResult[] = [];
+    const allResults: ReturnType<typeof calculateSessionResults> = [];
     
     loggers.forEach(logger => {
       if (logger.type && sessions.length > 0) {
@@ -101,7 +101,7 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
           <CardContent className="p-4">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-secondary/20">
-                <Clock className="w-5 h-5 text-secondary" />
+                <Clock className="w-5 h-5 text-secondary-foreground" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">측정 회차</p>
@@ -181,39 +181,40 @@ export function ResultsSummary({ loggers, sessions }: ResultsSummaryProps) {
                   <TableHead>회차</TableHead>
                   <TableHead className="text-right">평균 온도 (≥63℃)</TableHead>
                   <TableHead className="text-right">유지 시간</TableHead>
-                  <TableHead className="text-right">최대 F Value</TableHead>
-                  <TableHead className="text-right">F63℃</TableHead>
-                  <TableHead className="text-right">F121℃</TableHead>
+                  <TableHead className="text-right">F Value</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {results
                   .filter(r => r.loggerType === 'product')
-                  .map((result, idx) => (
-                    <TableRow key={`product-${idx}`}>
-                      <TableCell className="font-medium">
-                        {result.loggerName}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{result.sessionName}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono font-medium text-chart-2">
-                        {result.averageTemp.toFixed(2)}℃
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {result.durationMinutes.toFixed(1)}분
-                      </TableCell>
-                      <TableCell className="text-right font-mono font-medium">
-                        {result.maxFValue.toFixed(4)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {result.f63Minutes?.toFixed(1) || '-'}분
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {result.f121Minutes?.toFixed(1) || '-'}분
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  .map((result, idx) => {
+                    const isSterilization = result.sterilizationType === 'sterilization';
+                    const fValueLabel = isSterilization ? 'F121℃ 이상' : 'F63℃ 이상';
+                    const durationToShow = isSterilization ? result.f121Minutes : result.f63Minutes;
+                    
+                    return (
+                      <TableRow key={`product-${idx}`}>
+                        <TableCell className="font-medium">
+                          {result.loggerName}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{result.sessionName}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-medium text-chart-2">
+                          {result.averageTemp.toFixed(2)}℃
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          {result.durationMinutes.toFixed(1)}분
+                        </TableCell>
+                        <TableCell className="text-right font-mono font-medium">
+                          <div className="flex flex-col items-end">
+                            <span className="text-xs text-muted-foreground">{fValueLabel}</span>
+                            <span>{result.sessionFValue?.toFixed(2) || '0.00'}</span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
               </TableBody>
             </Table>
           </CardContent>

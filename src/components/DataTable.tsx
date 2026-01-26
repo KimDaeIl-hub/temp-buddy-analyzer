@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import * as React from "react";
+import { useMemo } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Database, ChevronLeft, ChevronRight } from "lucide-react";
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Database } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface DataTableProps {
@@ -13,59 +13,60 @@ interface DataTableProps {
   sessions: MeasurementSession[];
 }
 
-const ROWS_PER_PAGE = 50;
-
 const LOGGER_COLORS = [
-  { bg: 'bg-sky-500/10', border: 'border-sky-500/30', text: 'text-sky-600' },
-  { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-600' },
-  { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-600' },
-  { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-600' },
+  { bg: 'bg-sky-500/10', border: 'border-sky-500/30', text: 'text-sky-600', highlight: 'bg-sky-500/20' },
+  { bg: 'bg-green-500/10', border: 'border-green-500/30', text: 'text-green-600', highlight: 'bg-green-500/20' },
+  { bg: 'bg-orange-500/10', border: 'border-orange-500/30', text: 'text-orange-600', highlight: 'bg-orange-500/20' },
+  { bg: 'bg-purple-500/10', border: 'border-purple-500/30', text: 'text-purple-600', highlight: 'bg-purple-500/20' },
 ];
 
 export function DataTable({ loggers, sessions }: DataTableProps) {
-  const [currentPages, setCurrentPages] = useState<Record<string, number>>(() => {
-    const pages: Record<string, number> = {};
-    loggers.forEach(l => { pages[l.id] = 1; });
-    return pages;
-  });
+  // Merge all logger data by index to create a horizontal table
+  const mergedData = useMemo(() => {
+    const maxRecords = Math.max(...loggers.map(l => l.records.length));
+    const rows: Array<{
+      index: number;
+      loggerData: Array<{
+        logger: DataLogger;
+        record: typeof loggers[0]['records'][0] | null;
+        colorIdx: number;
+      }>;
+    }> = [];
 
-  const getRowHighlight = (temperature: number, logger: DataLogger): string => {
+    for (let i = 0; i < maxRecords; i++) {
+      rows.push({
+        index: i,
+        loggerData: loggers.map((logger, colorIdx) => ({
+          logger,
+          record: logger.records[i] || null,
+          colorIdx,
+        })),
+      });
+    }
+
+    return rows;
+  }, [loggers]);
+
+  const getRowHighlight = (temperature: number, logger: DataLogger, colorIdx: number): string => {
     if (!logger.type) return '';
     
     if (logger.type === 'hotwater' && logger.setTemperature) {
       const threshold = logger.setTemperature - 2.4;
       if (temperature >= threshold) {
-        return 'bg-chart-1/20 text-foreground';
+        return LOGGER_COLORS[colorIdx % LOGGER_COLORS.length].highlight;
       }
     }
     
     if (logger.type === 'product') {
       if (temperature >= 121) {
-        return 'bg-destructive/20 text-foreground font-medium';
+        return 'bg-destructive/30';
       }
       if (temperature >= 63) {
-        return 'bg-chart-2/20 text-foreground';
+        return LOGGER_COLORS[colorIdx % LOGGER_COLORS.length].highlight;
       }
     }
     
     return '';
-  };
-
-  const getSessionForRecord = (timestamp: Date): MeasurementSession | undefined => {
-    return sessions.find(s => timestamp >= s.startTime && timestamp <= s.endTime);
-  };
-
-  const getPaginatedRecords = (logger: DataLogger, page: number) => {
-    const startIndex = (page - 1) * ROWS_PER_PAGE;
-    return logger.records.slice(startIndex, startIndex + ROWS_PER_PAGE);
-  };
-
-  const getTotalPages = (logger: DataLogger) => {
-    return Math.ceil(logger.records.length / ROWS_PER_PAGE);
-  };
-
-  const handlePageChange = (loggerId: string, newPage: number) => {
-    setCurrentPages(prev => ({ ...prev, [loggerId]: newPage }));
   };
 
   if (loggers.length === 0 || loggers.every(l => l.records.length === 0)) {
@@ -79,132 +80,133 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-4">
-        <Database className="w-5 h-5 text-primary" />
-        <h2 className="text-lg font-semibold">원본 데이터 (전체 로거)</h2>
-        <Badge variant="outline">{loggers.length}개 로거</Badge>
-      </div>
-
-      {loggers.map((logger, loggerIdx) => {
-        const currentPage = currentPages[logger.id] || 1;
-        const totalPages = getTotalPages(logger);
-        const paginatedRecords = getPaginatedRecords(logger, currentPage);
-        const colorStyle = LOGGER_COLORS[loggerIdx % LOGGER_COLORS.length];
-        const hasFValue = logger.records.some(r => r.fValue !== undefined);
-
-        return (
-          <Card key={logger.id} className={cn("bg-card", colorStyle.border, "border-l-4")}>
-            <CardHeader className="pb-3">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <CardTitle className={cn("flex items-center gap-2 text-base", colorStyle.text)}>
-                  {logger.name}
-                </CardTitle>
-                
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">
-                    총 {logger.records.length.toLocaleString()}개 레코드
-                  </Badge>
-                  {logger.type && (
-                    <Badge variant="secondary">
-                      {logger.type === 'hotwater' ? '열수 측정' : '품온 측정'}
-                    </Badge>
-                  )}
-                  {logger.type === 'hotwater' && logger.setTemperature && (
-                    <Badge className="bg-chart-1/20 text-foreground border-chart-1/30">
-                      ≥ {(logger.setTemperature - 2.4).toFixed(1)}℃ 강조
-                    </Badge>
-                  )}
-                  {logger.type === 'product' && (
-                    <>
-                      <Badge className="bg-chart-2/20 text-foreground border-chart-2/30">
-                        ≥ 63℃ 강조
-                      </Badge>
-                      <Badge className="bg-destructive/20 text-foreground border-destructive/30">
-                        ≥ 121℃ 강조
-                      </Badge>
-                    </>
-                  )}
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <ScrollArea className="h-[300px]">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-card z-10">
-                    <TableRow>
-                      <TableHead className="w-16 text-center">#</TableHead>
-                      <TableHead className="w-24">회차</TableHead>
-                      <TableHead>날짜</TableHead>
-                      <TableHead>시간</TableHead>
-                      <TableHead className="text-right">온도 (℃)</TableHead>
-                      {hasFValue && (
-                        <TableHead className="text-right">F Value</TableHead>
-                      )}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedRecords.map((record) => {
-                      const session = getSessionForRecord(record.timestamp);
+    <Card className="bg-card">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Database className="w-4 h-4 text-primary" />
+            원본 데이터 (전체 로거)
+          </CardTitle>
+          <Badge variant="outline">{loggers.length}개 로거</Badge>
+        </div>
+        
+        {/* Logger legend with threshold info */}
+        <div className="flex flex-wrap gap-2 mt-2">
+          {loggers.map((logger, idx) => {
+            const colorStyle = LOGGER_COLORS[idx % LOGGER_COLORS.length];
+            return (
+              <Badge 
+                key={logger.id}
+                variant="outline"
+                className={cn("text-xs", colorStyle.border, colorStyle.text)}
+              >
+                {logger.name}
+                {logger.type === 'hotwater' && logger.setTemperature && (
+                  <span className="ml-1 opacity-70">
+                    (≥{(logger.setTemperature - 2.4).toFixed(1)}℃ 강조)
+                  </span>
+                )}
+                {logger.type === 'product' && (
+                  <span className="ml-1 opacity-70">(≥63℃ 강조)</span>
+                )}
+              </Badge>
+            );
+          })}
+        </div>
+      </CardHeader>
+      
+      <CardContent className="p-0">
+        <ScrollArea className="h-[600px] w-full">
+          <div className="min-w-max">
+            <Table>
+              <TableHeader className="sticky top-0 bg-card z-10">
+                <TableRow>
+                  {loggers.map((logger, idx) => {
+                    const colorStyle = LOGGER_COLORS[idx % LOGGER_COLORS.length];
+                    const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                    
+                    return (
+                      <TableHead 
+                        key={logger.id}
+                        colSpan={hasFValue ? 4 : 3}
+                        className={cn(
+                          "text-center border-r last:border-r-0",
+                          colorStyle.bg, colorStyle.text
+                        )}
+                      >
+                        {logger.name}
+                      </TableHead>
+                    );
+                  })}
+                </TableRow>
+                <TableRow>
+                  {loggers.map((logger, idx) => {
+                    const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                    
+                    return (
+                      <React.Fragment key={`header-${logger.id}`}>
+                        <TableHead className="text-center w-24 border-l first:border-l-0">날짜</TableHead>
+                        <TableHead className="text-center w-20">시간</TableHead>
+                        <TableHead className="text-right w-20">온도(℃)</TableHead>
+                        {hasFValue && (
+                          <TableHead className="text-right w-20 border-r">F value</TableHead>
+                        )}
+                        {!hasFValue && <TableHead className="w-0 border-r p-0" />}
+                      </React.Fragment>
+                    );
+                  })}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {mergedData.map((row) => (
+                  <TableRow key={row.index}>
+                    {row.loggerData.map(({ logger, record, colorIdx }) => {
+                      const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                      const highlightClass = record 
+                        ? getRowHighlight(record.temperature, logger, colorIdx) 
+                        : '';
+                      
+                      if (!record) {
+                        return (
+                          <React.Fragment key={`empty-${logger.id}-${row.index}`}>
+                            <TableCell className="text-center text-muted-foreground border-l first:border-l-0">-</TableCell>
+                            <TableCell className="text-center text-muted-foreground">-</TableCell>
+                            <TableCell className="text-right text-muted-foreground">-</TableCell>
+                            {hasFValue && <TableCell className="text-right border-r">-</TableCell>}
+                            {!hasFValue && <TableCell className="w-0 border-r p-0" />}
+                          </React.Fragment>
+                        );
+                      }
+                      
                       return (
-                        <TableRow 
-                          key={record.index}
-                          className={cn(getRowHighlight(record.temperature, logger))}
-                        >
-                          <TableCell className="text-center text-muted-foreground text-sm">
-                            {record.index + 1}
+                        <React.Fragment key={`data-${logger.id}-${row.index}`}>
+                          <TableCell className={cn("text-center font-mono text-xs border-l first:border-l-0", highlightClass)}>
+                            {record.date}
                           </TableCell>
-                          <TableCell>
-                            {session && (
-                              <Badge variant="outline" className="text-xs">
-                                {session.name}
-                              </Badge>
-                            )}
+                          <TableCell className={cn("text-center font-mono text-xs", highlightClass)}>
+                            {record.time}
                           </TableCell>
-                          <TableCell className="font-mono text-sm">{record.date}</TableCell>
-                          <TableCell className="font-mono text-sm">{record.time}</TableCell>
-                          <TableCell className="text-right font-mono font-medium">
+                          <TableCell className={cn("text-right font-mono text-sm font-medium", highlightClass)}>
                             {record.temperature.toFixed(2)}
                           </TableCell>
                           {hasFValue && (
-                            <TableCell className="text-right font-mono text-sm">
-                              {record.fValue?.toFixed(4) || '-'}
+                            <TableCell className={cn("text-right font-mono text-xs border-r", highlightClass)}>
+                              {record.fValue?.toFixed(2) || ''}
                             </TableCell>
                           )}
-                        </TableRow>
+                          {!hasFValue && <TableCell className="w-0 border-r p-0" />}
+                        </React.Fragment>
                       );
                     })}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-              
-              <div className="flex items-center justify-between p-4 border-t">
-                <p className="text-sm text-muted-foreground">
-                  페이지 {currentPage} / {totalPages}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(logger.id, Math.max(1, currentPage - 1))}
-                    disabled={currentPage === 1}
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handlePageChange(logger.id, Math.min(totalPages, currentPage + 1))}
-                    disabled={currentPage === totalPages}
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })}
-    </div>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <ScrollBar orientation="horizontal" />
+        </ScrollArea>
+      </CardContent>
+    </Card>
   );
 }
+

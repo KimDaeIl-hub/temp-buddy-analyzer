@@ -22,6 +22,7 @@ export interface MeasurementSession {
   name: string;
   startTime: Date;
   endTime: Date;
+  setTemperature?: number; // 회차별 열수 설정 온도
 }
 
 export interface CalculationResult {
@@ -33,8 +34,10 @@ export interface CalculationResult {
   averageTemp: number;
   durationMinutes: number;
   maxFValue: number;
+  sessionFValue?: number; // 회차별 F value (누적 아닌 순수 회차 값)
   f63Minutes?: number;
   f121Minutes?: number;
   recordCount: number;
   threshold?: number;
+  sterilizationType?: 'pasteurization' | 'sterilization';
 }
