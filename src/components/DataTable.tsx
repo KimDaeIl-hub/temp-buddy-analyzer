@@ -97,7 +97,6 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
             <Database className="w-4 h-4 text-primary" />
             원본 데이터 (전체 로거)
           </CardTitle>
-          <Badge variant="outline">{loggers.length}개 로거</Badge>
         </div>
         
         {/* Logger legend with threshold info */}

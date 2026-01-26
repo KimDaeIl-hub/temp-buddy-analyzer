@@ -337,10 +337,7 @@ export const TemperatureChart = forwardRef<TemperatureChartRef, TemperatureChart
               <div className="p-1.5 rounded-lg bg-primary/10">
                 <TrendingUp className="w-4 h-4 text-primary" />
               </div>
-              <span>Temperature Profile Trend</span>
-              <Badge variant="outline" className="ml-2 font-normal">
-                {loggers.length} Loggers
-              </Badge>
+              <span>온도 프로파일</span>
             </CardTitle>
             
             <div className="flex items-center gap-2 flex-wrap">

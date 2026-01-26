@@ -62,8 +62,8 @@ const Index = () => {
               <Thermometer className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-foreground">Temperature Logger Analyzer</h1>
-              <p className="text-xs text-muted-foreground">TMI QLever Data Analysis Tool</p>
+              <h1 className="text-lg font-bold text-foreground">온도 데이터로거 분석기</h1>
+              <p className="text-xs text-muted-foreground">TMI QLever 데이터 분석 도구</p>
             </div>
           </div>
           
@@ -80,7 +80,7 @@ const Index = () => {
               />
               <Button variant="outline" size="sm" onClick={handleReset}>
                 <RefreshCw className="w-4 h-4 mr-2" />
-                New File
+                새 파일
               </Button>
             </div>
           )}
@@ -92,10 +92,10 @@ const Index = () => {
           <div className="max-w-2xl mx-auto space-y-6">
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-2xl font-bold text-foreground">
-                Start Data Logger Analysis
+                데이터 로거 분석 시작
               </h2>
               <p className="text-muted-foreground">
-                Upload a CSV file exported from TMI QLever to analyze temperature data
+                TMI QLever에서 내보낸 CSV 파일을 업로드하여 온도 데이터를 분석하세요
               </p>
             </div>
             
@@ -106,24 +106,24 @@ const Index = () => {
                 <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
                   <TrendingUp className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">Multi-Logger Support</h3>
-                <p className="text-sm text-muted-foreground">Analyze 4 loggers simultaneously</p>
+                <h3 className="font-medium mb-1">다중 로거 지원</h3>
+                <p className="text-sm text-muted-foreground">4개 로거 동시 분석</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
                   <BarChart3 className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">Session Splitting</h3>
-                <p className="text-sm text-muted-foreground">Intuitive interval selection</p>
+                <h3 className="font-medium mb-1">회차 분할</h3>
+                <p className="text-sm text-muted-foreground">직관적인 구간 선택</p>
               </div>
               
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
                   <FileDown className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">PDF Report</h3>
-                <p className="text-sm text-muted-foreground">Export analysis results</p>
+                <h3 className="font-medium mb-1">PDF 리포트</h3>
+                <p className="text-sm text-muted-foreground">분석 결과 내보내기</p>
               </div>
             </div>
           </div>
@@ -134,19 +134,19 @@ const Index = () => {
                 <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
                   <TabsTrigger value="chart" className="gap-2">
                     <TrendingUp className="w-4 h-4" />
-                    <span className="hidden sm:inline">Chart / Settings</span>
+                    <span className="hidden sm:inline">그래프/설정</span>
                   </TabsTrigger>
                   <TabsTrigger value="data" className="gap-2">
                     <Database className="w-4 h-4" />
-                    <span className="hidden sm:inline">Data</span>
+                    <span className="hidden sm:inline">데이터</span>
                   </TabsTrigger>
                   <TabsTrigger value="analysis" className="gap-2">
                     <Calculator className="w-4 h-4" />
-                    <span className="hidden sm:inline">Analysis</span>
+                    <span className="hidden sm:inline">분석</span>
                   </TabsTrigger>
                   <TabsTrigger value="summary" className="gap-2">
                     <BarChart3 className="w-4 h-4" />
-                    <span className="hidden sm:inline">Results</span>
+                    <span className="hidden sm:inline">결과</span>
                   </TabsTrigger>
                 </TabsList>
 

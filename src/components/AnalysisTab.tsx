@@ -341,44 +341,34 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
 
                           {/* Results */}
                           {result && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t">
+                            <div className="grid grid-cols-3 gap-3 pt-3 border-t">
                               <div className="p-2 rounded-lg bg-primary/10">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <Thermometer className="w-3 h-3" />
-                                  평균 온도
+                                  평균 온도 (기준치 이상)
                                 </div>
                                 <div className="text-lg font-bold text-primary">
-                                  {result.averageTemp.toFixed(2)}°C
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                  ({result.minTemp.toFixed(1)} ~ {result.maxTemp.toFixed(1)}°C)
+                                  {(result.itemResults.reduce((sum, item) => sum + item.averageTemp, 0) / result.itemResults.length).toFixed(2)}°C
                                 </div>
                               </div>
                               
                               <div className="p-2 rounded-lg bg-secondary">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <Clock className="w-3 h-3" />
-                                  총 유지 시간
+                                  평균 유지 시간
                                 </div>
                                 <div className="text-lg font-bold">
-                                  {result.totalDurationMinutes.toFixed(1)}분
+                                  {(result.totalDurationMinutes / result.itemResults.length).toFixed(1)}분
                                 </div>
                               </div>
                               
                               <div className="p-2 rounded-lg bg-accent">
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
                                   <TrendingUp className="w-3 h-3" />
-                                  총 F-value
+                                  평균 F-value
                                 </div>
                                 <div className="text-lg font-bold text-accent-foreground">
-                                  {result.totalFValue.toFixed(2)}
-                                </div>
-                              </div>
-                              
-                              <div className="p-2 rounded-lg bg-muted">
-                                <div className="text-xs text-muted-foreground">총 레코드</div>
-                                <div className="text-lg font-bold">
-                                  {result.totalRecords.toLocaleString()}
+                                  {(result.totalFValue / result.itemResults.length).toFixed(2)}
                                 </div>
                               </div>
                             </div>
@@ -394,7 +384,7 @@ export function AnalysisTab({ loggers, sessions, analysisGroups, onAnalysisGroup
                                     <tr>
                                       <th className="px-2 py-1 text-left">로거</th>
                                       <th className="px-2 py-1 text-left">회차</th>
-                                      <th className="px-2 py-1 text-right">평균 온도</th>
+                                      <th className="px-2 py-1 text-right">평균 온도 (기준치↑)</th>
                                       <th className="px-2 py-1 text-right">유지 시간</th>
                                       <th className="px-2 py-1 text-right">F-value</th>
                                     </tr>
