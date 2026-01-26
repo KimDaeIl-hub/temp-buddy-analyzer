@@ -51,6 +51,49 @@ const koreanToEnglish: Record<string, string> = {
   "분석 그룹": "Analysis Group",
 };
 
+// Sanitize text for PDF - convert Korean to English equivalent
+const sanitizeForPDF = (text: string): string => {
+  if (!text) return "";
+  
+  // Check if text contains Korean characters
+  const hasKorean = /[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text);
+  
+  if (hasKorean) {
+    // Common session name patterns
+    if (/^\d+차\s*측정$/.test(text)) {
+      const num = text.match(/^(\d+)/)?.[1];
+      return `Session ${num}`;
+    }
+    if (/^\d+차$/.test(text)) {
+      const num = text.match(/^(\d+)/)?.[1];
+      return `Session ${num}`;
+    }
+    if (/측정\s*\d+$/.test(text)) {
+      const num = text.match(/(\d+)$/)?.[1];
+      return `Measurement ${num}`;
+    }
+    
+    // Check direct mappings
+    for (const [korean, english] of Object.entries(koreanToEnglish)) {
+      if (text.includes(korean)) {
+        text = text.replace(new RegExp(korean, 'g'), english);
+      }
+    }
+    
+    // If still has Korean, replace with generic label
+    if (/[ㄱ-ㅎ|ㅏ-ㅣ|가-힣]/.test(text)) {
+      // Try to extract any numbers and create a generic label
+      const numbers = text.match(/\d+/g);
+      if (numbers) {
+        return `Session ${numbers.join('-')}`;
+      }
+      return "Session";
+    }
+  }
+  
+  return text;
+};
+
 // Calculate analysis group result
 function calculateGroupResult(
   group: AnalysisGroup,
@@ -314,8 +357,8 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
           startY: yPos,
           head: [["Logger", "Session", "Threshold", "Avg Temp", "Duration", "Records"]],
           body: hotwaterResults.map((r) => [
-            r.loggerName,
-            r.sessionName,
+            sanitizeForPDF(r.loggerName),
+            sanitizeForPDF(r.sessionName),
             `>= ${r.threshold?.toFixed(1)}C`,
             `${r.averageTemp.toFixed(2)}C`,
             `${r.durationMinutes.toFixed(1)} min`,
@@ -347,8 +390,8 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
             const isSterilization = r.sterilizationType === "sterilization";
             const fValueLabel = isSterilization ? "F121C" : "F63C";
             return [
-              r.loggerName,
-              r.sessionName,
+              sanitizeForPDF(r.loggerName),
+              sanitizeForPDF(r.sessionName),
               `${r.averageTemp.toFixed(2)}C`,
               `${r.durationMinutes.toFixed(1)} min`,
               `${fValueLabel}: ${r.sessionFValue?.toFixed(2) || "0.00"}`,
@@ -389,7 +432,7 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
             pdf.setFontSize(10);
             pdf.setFont("helvetica", "bold");
             pdf.setTextColor(0, 0, 0);
-            pdf.text(`Group: ${group.name}`, margin, yPos);
+            pdf.text(`Group: ${sanitizeForPDF(group.name)}`, margin, yPos);
             yPos += 5;
 
             // Group summary
@@ -407,8 +450,8 @@ export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups
               startY: yPos,
               head: [["Logger", "Session", "Avg Temp", "Duration", "F-Value"]],
               body: result.itemResults.map((item) => [
-                item.loggerName,
-                item.sessionName,
+                sanitizeForPDF(item.loggerName),
+                sanitizeForPDF(item.sessionName),
                 `${item.averageTemp.toFixed(2)}C`,
                 `${item.durationMinutes.toFixed(1)} min`,
                 item.fValue.toFixed(2),
