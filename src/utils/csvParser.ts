@@ -6,107 +6,108 @@ export function parseCSVContent(content: string): DataLogger[] {
   
   if (lines.length === 0) return loggers;
   
-  // Parse header to find logger columns
-  const headerLine = lines[0];
-  const headers = headerLine.split(';');
+  let currentLogger: DataLogger | null = null;
+  let hasFValueColumn = false;
+  let recordIndex = 0;
   
-  // Find all temperature columns (pattern: pv######)
-  const loggerColumns: { index: number; name: string; hasFValue: boolean }[] = [];
-  
-  headers.forEach((header, index) => {
-    // Clean header from encoding issues
-    const cleanHeader = header.replace(/[^\x20-\x7E가-힣]/g, '').trim();
-    
-    // Match patterns like "pv144556(File 1) 1- Temperature" or similar
-    const pvMatch = cleanHeader.match(/pv\d+/i);
-    if (pvMatch || cleanHeader.toLowerCase().includes('temperature')) {
-      // Check if next column might be F-value for this logger
-      const nextHeader = headers[index + 1]?.replace(/[^\x20-\x7E가-힣]/g, '').trim().toLowerCase();
-      const hasFValue = nextHeader?.includes('f') || nextHeader?.includes('value') || false;
-      
-      loggerColumns.push({ 
-        index, 
-        name: pvMatch ? pvMatch[0] : `Logger ${loggerColumns.length + 1}`,
-        hasFValue
-      });
-    }
-  });
-
-  // If no specific logger columns found, assume single logger with columns: date, time, temp, [fvalue]
-  if (loggerColumns.length === 0 && headers.length >= 3) {
-    loggerColumns.push({ index: 2, name: 'Logger 1', hasFValue: headers.length >= 4 });
-  }
-
-  // Initialize loggers
-  loggerColumns.forEach((col, idx) => {
-    loggers.push({
-      id: `logger-${idx + 1}`,
-      name: col.name,
-      type: null,
-      records: [],
-    });
-  });
-
-  // Parse data rows
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim()) continue;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
     
     const values = line.split(';');
-    if (values.length < 3) continue;
-
-    const dateStr = values[0]?.trim();
-    const timeStr = values[1]?.trim();
     
-    if (!dateStr || !timeStr) continue;
-
-    // Parse date (format: DD/MM/YYYY)
-    const dateParts = dateStr.split('/');
-    let timestamp: Date;
-    
-    if (dateParts.length === 3) {
-      const day = parseInt(dateParts[0], 10);
-      const month = parseInt(dateParts[1], 10) - 1;
-      const year = parseInt(dateParts[2], 10);
+    // Check if this line is a header (contains "pv" pattern)
+    const headerMatch = line.match(/pv(\d+)/i);
+    if (headerMatch && (line.toLowerCase().includes('temperature') || line.toLowerCase().includes('hour'))) {
+      // This is a header line - start new logger
+      if (currentLogger && currentLogger.records.length > 0) {
+        loggers.push(currentLogger);
+      }
       
-      // Parse time (format: HH:MM:SS.mmm)
-      const timeParts = timeStr.split(':');
-      const hours = parseInt(timeParts[0] || '0', 10);
-      const minutes = parseInt(timeParts[1] || '0', 10);
-      const seconds = parseFloat(timeParts[2] || '0');
+      const loggerName = `pv${headerMatch[1]}`;
       
-      timestamp = new Date(year, month, day, hours, minutes, Math.floor(seconds));
-    } else {
+      // Check if this logger has F-value column
+      hasFValueColumn = line.toLowerCase().includes('fo') || line.toLowerCase().includes('f value');
+      
+      currentLogger = {
+        id: `logger-${loggers.length + 1}`,
+        name: loggerName,
+        type: null,
+        records: [],
+      };
+      recordIndex = 0;
       continue;
     }
-
-    // Process each logger column
-    loggerColumns.forEach((col, loggerIdx) => {
-      const tempStr = values[col.index]?.trim().replace(',', '.');
-      const temperature = parseFloat(tempStr);
-      
-      if (!isNaN(temperature)) {
-        // Check if there's an F-value column (usually next column)
-        let fValue: number | undefined;
-        if (col.hasFValue) {
-          const fValueStr = values[col.index + 1]?.trim().replace(',', '.');
-          if (fValueStr && !isNaN(parseFloat(fValueStr))) {
-            fValue = parseFloat(fValueStr);
-          }
-        }
-        
-        loggers[loggerIdx].records.push({
-          date: dateStr,
-          time: timeStr.split('.')[0], // Remove milliseconds for display
-          temperature,
-          fValue,
-          timestamp,
-          index: i - 1,
-        });
+    
+    // Parse data row
+    if (!currentLogger) {
+      // First data row before any header - create default logger
+      const firstHeaderMatch = line.match(/pv(\d+)/i);
+      if (firstHeaderMatch) {
+        currentLogger = {
+          id: 'logger-1',
+          name: `pv${firstHeaderMatch[1]}`,
+          type: null,
+          records: [],
+        };
+        continue;
       }
+    }
+    
+    if (!currentLogger) continue;
+    
+    // Try to parse as data row
+    if (values.length < 3) continue;
+    
+    const dateStr = values[0]?.trim();
+    const timeStr = values[1]?.trim();
+    const tempStr = values[2]?.trim().replace(',', '.');
+    
+    // Validate date format (DD/MM/YYYY)
+    if (!dateStr || !dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) continue;
+    if (!timeStr || !timeStr.match(/^\d{2}:\d{2}:\d{2}/)) continue;
+    
+    const temperature = parseFloat(tempStr);
+    if (isNaN(temperature)) continue;
+    
+    // Parse date
+    const dateParts = dateStr.split('/');
+    const day = parseInt(dateParts[0], 10);
+    const month = parseInt(dateParts[1], 10) - 1;
+    const year = parseInt(dateParts[2], 10);
+    
+    // Parse time
+    const timeParts = timeStr.split(':');
+    const hours = parseInt(timeParts[0] || '0', 10);
+    const minutes = parseInt(timeParts[1] || '0', 10);
+    const seconds = parseFloat(timeParts[2] || '0');
+    
+    const timestamp = new Date(year, month, day, hours, minutes, Math.floor(seconds));
+    
+    // Parse F-value if exists
+    let fValue: number | undefined;
+    if (hasFValueColumn && values[3]) {
+      const fValueStr = values[3].trim().replace(',', '.');
+      if (fValueStr && !isNaN(parseFloat(fValueStr))) {
+        fValue = parseFloat(fValueStr);
+      }
+    }
+    
+    currentLogger.records.push({
+      date: dateStr,
+      time: timeStr.split('.')[0],
+      temperature,
+      fValue,
+      timestamp,
+      index: recordIndex++,
     });
   }
-
+  
+  // Add last logger
+  if (currentLogger && currentLogger.records.length > 0) {
+    loggers.push(currentLogger);
+  }
+  
   return loggers;
 }
 
@@ -136,7 +137,6 @@ export async function readFileWithEncoding(file: File): Promise<string> {
   // Try UTF-8 first
   try {
     const utf8Content = await file.text();
-    // Check if content looks valid (has readable characters)
     if (utf8Content.includes('pv') || utf8Content.includes('Temperature')) {
       return utf8Content;
     }
@@ -144,7 +144,7 @@ export async function readFileWithEncoding(file: File): Promise<string> {
     // Continue to try other encodings
   }
   
-  // Try with different encodings using TextDecoder
+  // Try with different encodings
   const encodings = ['euc-kr', 'cp949', 'iso-8859-1', 'windows-1252'];
   const buffer = await file.arrayBuffer();
   
@@ -160,6 +160,5 @@ export async function readFileWithEncoding(file: File): Promise<string> {
     }
   }
   
-  // Fallback to UTF-8
   return await file.text();
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
   ResponsiveContainer, ReferenceLine, ReferenceArea, Brush
 } from "recharts";
-import { TrendingUp, Scissors, Plus, Trash2, Check } from "lucide-react";
+import { TrendingUp, Scissors, Trash2, Check, MousePointer } from "lucide-react";
 import { formatDateTime } from "@/utils/csvParser";
 
 interface TemperatureChartProps {
@@ -19,11 +19,11 @@ interface TemperatureChartProps {
 }
 
 const LOGGER_COLORS = [
-  'hsl(var(--chart-1))',
-  'hsl(var(--chart-2))',
-  'hsl(var(--destructive))',
-  'hsl(var(--chart-4))',
-  'hsl(var(--chart-5))',
+  '#0ea5e9', // sky-500
+  '#22c55e', // green-500
+  '#f97316', // orange-500
+  '#a855f7', // purple-500
+  '#ef4444', // red-500
 ];
 
 export function TemperatureChart({ loggers, sessions, onSessionsChange }: TemperatureChartProps) {
@@ -32,70 +32,82 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [newSessionName, setNewSessionName] = useState("");
 
-  // Combine all logger data into a single chart dataset
+  // Use first logger as primary timeline (all loggers should have same timestamps)
+  const primaryLogger = loggers[0];
+
+  // Build chart data - merge all loggers by timestamp
   const chartData = useMemo(() => {
-    if (loggers.length === 0 || loggers[0].records.length === 0) return [];
+    if (!primaryLogger || primaryLogger.records.length === 0) return [];
     
-    // Use the first logger's records as the base timeline
-    const baseLogger = loggers[0];
-    const step = Math.max(1, Math.floor(baseLogger.records.length / 500));
+    // Sample data to avoid too many points (max 500 points)
+    const step = Math.max(1, Math.floor(primaryLogger.records.length / 500));
     
-    return baseLogger.records
+    return primaryLogger.records
       .filter((_, idx) => idx % step === 0)
-      .map((record, chartIdx) => {
+      .map((record) => {
         const dataPoint: Record<string, any> = {
           time: record.time,
           timestamp: record.timestamp.getTime(),
-          index: chartIdx,
+          index: record.index,
           fullTime: formatDateTime(record.timestamp),
         };
         
-        // Add temperature data from all loggers
+        // Add temperature from all loggers (match by time)
         loggers.forEach((logger, loggerIdx) => {
-          const loggerRecord = logger.records.find(
+          // Find matching record by similar timestamp
+          const matchingRecord = logger.records.find(
             r => Math.abs(r.timestamp.getTime() - record.timestamp.getTime()) < 10000
-          ) || logger.records[record.index];
+          );
           
-          if (loggerRecord) {
-            dataPoint[`temp_${loggerIdx}`] = loggerRecord.temperature;
-            if (loggerRecord.fValue !== undefined) {
-              dataPoint[`fvalue_${loggerIdx}`] = loggerRecord.fValue;
+          if (matchingRecord) {
+            dataPoint[`temp_${loggerIdx}`] = matchingRecord.temperature;
+            if (matchingRecord.fValue !== undefined) {
+              dataPoint[`fvalue_${loggerIdx}`] = matchingRecord.fValue;
             }
           }
         });
         
         return dataPoint;
       });
-  }, [loggers]);
+  }, [loggers, primaryLogger]);
 
   const hasFValue = useMemo(() => 
     loggers.some(logger => logger.records.some(r => r.fValue !== undefined)),
     [loggers]
   );
 
-  const handleChartClick = useCallback((e: any) => {
-    if (!isSelectingSession || !e?.activePayload?.[0]?.payload) return;
-    
-    const timestamp = e.activePayload[0].payload.timestamp;
-    
-    if (selectionStart === null) {
+  const handleChartMouseDown = useCallback((e: any) => {
+    if (!isSelectingSession) return;
+    if (e && e.activePayload && e.activePayload[0]) {
+      const timestamp = e.activePayload[0].payload.timestamp;
       setSelectionStart(timestamp);
-    } else {
-      const start = Math.min(selectionStart, timestamp);
-      const end = Math.max(selectionStart, timestamp);
-      setSelectionEnd(end);
-      setSelectionStart(start);
+      setSelectionEnd(null);
+    }
+  }, [isSelectingSession]);
+
+  const handleChartMouseMove = useCallback((e: any) => {
+    if (!isSelectingSession || selectionStart === null) return;
+    if (e && e.activePayload && e.activePayload[0]) {
+      const timestamp = e.activePayload[0].payload.timestamp;
+      setSelectionEnd(timestamp);
     }
   }, [isSelectingSession, selectionStart]);
+
+  const handleChartMouseUp = useCallback(() => {
+    // Selection complete - ready for confirmation
+  }, []);
 
   const confirmSession = useCallback(() => {
     if (selectionStart === null || selectionEnd === null) return;
     
+    const start = Math.min(selectionStart, selectionEnd);
+    const end = Math.max(selectionStart, selectionEnd);
+    
     const newSession: MeasurementSession = {
       id: sessions.length + 1,
       name: newSessionName || `${sessions.length + 1}차 측정`,
-      startTime: new Date(selectionStart),
-      endTime: new Date(selectionEnd),
+      startTime: new Date(start),
+      endTime: new Date(end),
     };
     
     onSessionsChange([...sessions, newSession]);
@@ -123,8 +135,20 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   }, [sessions, onSessionsChange]);
 
   const getSessionColor = (index: number) => {
-    const colors = ['rgba(59, 130, 246, 0.15)', 'rgba(16, 185, 129, 0.15)', 'rgba(245, 158, 11, 0.15)', 'rgba(239, 68, 68, 0.15)'];
+    const colors = [
+      'rgba(59, 130, 246, 0.15)', 
+      'rgba(16, 185, 129, 0.15)', 
+      'rgba(245, 158, 11, 0.15)', 
+      'rgba(239, 68, 68, 0.15)',
+      'rgba(168, 85, 247, 0.15)'
+    ];
     return colors[index % colors.length];
+  };
+
+  // Find chart data point closest to a timestamp
+  const findChartTimeForTimestamp = (ts: number) => {
+    const point = chartData.find(d => d.timestamp >= ts);
+    return point?.time || chartData[chartData.length - 1]?.time;
   };
 
   if (loggers.length === 0 || chartData.length === 0) {
@@ -144,10 +168,10 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <TrendingUp className="w-4 h-4 text-primary" />
-              온도 그래프 (전체 데이터로거)
+              온도 그래프 ({loggers.length}개 로거)
             </CardTitle>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {!isSelectingSession ? (
                 <Button 
                   size="sm" 
@@ -158,12 +182,12 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                   회차 분할
                 </Button>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Input
                     placeholder="회차 이름"
                     value={newSessionName}
                     onChange={(e) => setNewSessionName(e.target.value)}
-                    className="h-8 w-32"
+                    className="h-8 w-28"
                   />
                   <Button 
                     size="sm" 
@@ -183,14 +207,17 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
           
           {isSelectingSession && (
             <div className="p-3 rounded-lg bg-primary/10 border border-primary/20">
-              <p className="text-sm text-primary">
-                {selectionStart === null 
-                  ? "📍 그래프에서 시작 지점을 클릭하세요" 
-                  : selectionEnd === null
-                    ? "📍 종료 지점을 클릭하세요"
-                    : `✅ 선택 완료: ${new Date(selectionStart).toLocaleTimeString()} ~ ${new Date(selectionEnd).toLocaleTimeString()}`
-                }
-              </p>
+              <div className="flex items-center gap-2">
+                <MousePointer className="w-4 h-4 text-primary" />
+                <p className="text-sm text-primary">
+                  {selectionStart === null 
+                    ? "그래프 위에서 드래그하여 구간을 선택하세요" 
+                    : selectionEnd === null
+                      ? "드래그 중..."
+                      : `✅ 선택됨: ${new Date(Math.min(selectionStart, selectionEnd)).toLocaleTimeString()} ~ ${new Date(Math.max(selectionStart, selectionEnd)).toLocaleTimeString()}`
+                  }
+                </p>
+              </div>
             </div>
           )}
           
@@ -199,9 +226,14 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
               <Badge 
                 key={logger.id} 
                 variant="outline"
-                style={{ borderColor: LOGGER_COLORS[idx], color: LOGGER_COLORS[idx] }}
+                style={{ 
+                  borderColor: LOGGER_COLORS[idx % LOGGER_COLORS.length], 
+                  color: LOGGER_COLORS[idx % LOGGER_COLORS.length],
+                  backgroundColor: `${LOGGER_COLORS[idx % LOGGER_COLORS.length]}15`
+                }}
               >
                 {logger.name}
+                {logger.records.some(r => r.fValue !== undefined) && ' (F값)'}
               </Badge>
             ))}
           </div>
@@ -209,7 +241,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
           {sessions.length > 0 && (
             <div className="flex flex-wrap gap-2">
               <Label className="text-sm text-muted-foreground self-center">측정 회차:</Label>
-              {sessions.map((session, idx) => (
+              {sessions.map((session) => (
                 <Badge 
                   key={session.id} 
                   variant="secondary"
@@ -229,12 +261,14 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
         </div>
       </CardHeader>
       <CardContent>
-        <div className="h-[500px] w-full">
+        <div className="h-[500px] w-full" style={{ cursor: isSelectingSession ? 'crosshair' : 'default' }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart 
               data={chartData} 
               margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              onClick={handleChartClick}
+              onMouseDown={handleChartMouseDown}
+              onMouseMove={handleChartMouseMove}
+              onMouseUp={handleChartMouseUp}
             >
               <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
               <XAxis 
@@ -273,8 +307,8 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                 <ReferenceArea
                   key={session.id}
                   yAxisId="temp"
-                  x1={chartData.find(d => d.timestamp >= session.startTime.getTime())?.time}
-                  x2={chartData.find(d => d.timestamp >= session.endTime.getTime())?.time || chartData[chartData.length - 1]?.time}
+                  x1={findChartTimeForTimestamp(session.startTime.getTime())}
+                  x2={findChartTimeForTimestamp(session.endTime.getTime())}
                   fill={getSessionColor(idx)}
                   label={{ 
                     value: session.name, 
@@ -285,13 +319,14 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
               ))}
               
               {/* Current selection area */}
-              {selectionStart !== null && selectionEnd !== null && (
+              {isSelectingSession && selectionStart !== null && selectionEnd !== null && (
                 <ReferenceArea
                   yAxisId="temp"
-                  x1={chartData.find(d => d.timestamp >= selectionStart)?.time}
-                  x2={chartData.find(d => d.timestamp >= selectionEnd)?.time}
+                  x1={findChartTimeForTimestamp(Math.min(selectionStart, selectionEnd))}
+                  x2={findChartTimeForTimestamp(Math.max(selectionStart, selectionEnd))}
                   fill="rgba(59, 130, 246, 0.3)"
-                  stroke="hsl(var(--primary))"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
                 />
               )}
               
@@ -299,12 +334,12 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
               <ReferenceLine 
                 y={63} 
                 yAxisId="temp"
-                stroke="hsl(var(--chart-2))" 
+                stroke="#22c55e" 
                 strokeDasharray="5 5"
                 label={{ 
                   value: '63℃', 
                   position: 'right',
-                  style: { fontSize: 10, fill: 'hsl(var(--chart-2))' }
+                  style: { fontSize: 10, fill: '#22c55e' }
                 }}
               />
               
@@ -315,11 +350,12 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                   yAxisId="temp"
                   type="monotone" 
                   dataKey={`temp_${idx}`} 
-                  name={`${logger.name} 온도`}
-                  stroke={LOGGER_COLORS[idx]} 
+                  name={`${logger.name}`}
+                  stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
+                  connectNulls
                 />
               ))}
               
@@ -333,12 +369,13 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                     yAxisId="fvalue"
                     type="monotone" 
                     dataKey={`fvalue_${idx}`} 
-                    name={`${logger.name} F Value`}
-                    stroke={LOGGER_COLORS[idx]} 
+                    name={`${logger.name} F값`}
+                    stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
                     strokeWidth={1.5}
                     strokeDasharray="5 5"
                     dot={false}
                     activeDot={{ r: 3 }}
+                    connectNulls
                   />
                 );
               })}
