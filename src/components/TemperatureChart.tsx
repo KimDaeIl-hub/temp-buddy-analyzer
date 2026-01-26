@@ -1,16 +1,28 @@
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useRef } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, ReferenceLine, ReferenceArea, Brush
+  ResponsiveContainer, ReferenceLine, ReferenceArea
 } from "recharts";
-import { TrendingUp, Scissors, Trash2, Check, MousePointer, ArrowRight } from "lucide-react";
+import { 
+  TrendingUp, Scissors, Trash2, Check, MousePointer, ArrowRight, 
+  Download, ZoomIn, ZoomOut, RotateCcw, Image
+} from "lucide-react";
 import { formatDateTime } from "@/utils/csvParser";
+import html2canvas from "html2canvas";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 interface TemperatureChartProps {
   loggers: DataLogger[];
@@ -32,6 +44,10 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [newSessionName, setNewSessionName] = useState("");
   const [newSessionSetTemp, setNewSessionSetTemp] = useState<string>("");
+  
+  // Zoom state
+  const [zoomRange, setZoomRange] = useState<[number, number]>([0, 100]);
+  const chartRef = useRef<HTMLDivElement>(null);
 
   // Check if any logger is hotwater type
   const hasHotwaterLogger = loggers.some(l => l.type === 'hotwater');
@@ -39,8 +55,8 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   // Use first logger as primary timeline (all loggers should have same timestamps)
   const primaryLogger = loggers[0];
 
-  // Build chart data - merge all loggers by timestamp
-  const chartData = useMemo(() => {
+  // Build full chart data
+  const fullChartData = useMemo(() => {
     if (!primaryLogger || primaryLogger.records.length === 0) return [];
     
     // Sample data to avoid too many points (max 500 points)
@@ -58,7 +74,6 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
         
         // Add temperature from all loggers (match by time)
         loggers.forEach((logger, loggerIdx) => {
-          // Find matching record by similar timestamp
           const matchingRecord = logger.records.find(
             r => Math.abs(r.timestamp.getTime() - record.timestamp.getTime()) < 10000
           );
@@ -74,6 +89,14 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
         return dataPoint;
       });
   }, [loggers, primaryLogger]);
+
+  // Zoomed chart data
+  const chartData = useMemo(() => {
+    if (fullChartData.length === 0) return [];
+    const startIdx = Math.floor((zoomRange[0] / 100) * fullChartData.length);
+    const endIdx = Math.ceil((zoomRange[1] / 100) * fullChartData.length);
+    return fullChartData.slice(startIdx, Math.max(endIdx, startIdx + 1));
+  }, [fullChartData, zoomRange]);
 
   const hasFValue = useMemo(() => 
     loggers.some(logger => logger.records.some(r => r.fValue !== undefined)),
@@ -96,21 +119,18 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     }
   }, [lastSessionEndTime]);
 
-  // Click-based selection: first click = start, second click = end
+  // Click-based selection
   const handleChartClick = useCallback((e: any) => {
     if (!isSelectingSession) return;
     if (e && e.activePayload && e.activePayload[0]) {
       const timestamp = e.activePayload[0].payload.timestamp;
       
       if (selectionStart === null) {
-        // First click - set start point
         setSelectionStart(timestamp);
         setSelectionEnd(null);
       } else if (selectionEnd === null) {
-        // Second click - set end point
         setSelectionEnd(timestamp);
       } else {
-        // Already have both - reset and start new selection
         setSelectionStart(timestamp);
         setSelectionEnd(null);
       }
@@ -123,7 +143,6 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     
-    // Check for overlap with existing sessions
     const hasOverlap = sessions.some(session => {
       const sessionStart = session.startTime.getTime();
       const sessionEnd = session.endTime.getTime();
@@ -180,11 +199,75 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     return colors[index % colors.length];
   };
 
-  // Find chart data point closest to a timestamp
   const findChartTimeForTimestamp = (ts: number) => {
     const point = chartData.find(d => d.timestamp >= ts);
     return point?.time || chartData[chartData.length - 1]?.time;
   };
+
+  // Zoom controls
+  const handleZoomIn = useCallback(() => {
+    const range = zoomRange[1] - zoomRange[0];
+    if (range <= 10) return;
+    const center = (zoomRange[0] + zoomRange[1]) / 2;
+    const newRange = range * 0.6;
+    setZoomRange([
+      Math.max(0, center - newRange / 2),
+      Math.min(100, center + newRange / 2)
+    ]);
+  }, [zoomRange]);
+
+  const handleZoomOut = useCallback(() => {
+    const range = zoomRange[1] - zoomRange[0];
+    if (range >= 100) return;
+    const center = (zoomRange[0] + zoomRange[1]) / 2;
+    const newRange = Math.min(100, range * 1.5);
+    setZoomRange([
+      Math.max(0, center - newRange / 2),
+      Math.min(100, center + newRange / 2)
+    ]);
+  }, [zoomRange]);
+
+  const handleResetZoom = useCallback(() => {
+    setZoomRange([0, 100]);
+  }, []);
+
+  // Save chart as image
+  const saveChartAsImage = useCallback(async (sessionId?: number) => {
+    if (!chartRef.current) return;
+    
+    try {
+      const canvas = await html2canvas(chartRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+      });
+      
+      const link = document.createElement('a');
+      const fileName = sessionId 
+        ? `temperature_chart_session_${sessionId}.png`
+        : 'temperature_chart_full.png';
+      link.download = fileName;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    } catch (error) {
+      console.error('Failed to save chart:', error);
+    }
+  }, []);
+
+  // Zoom to specific session
+  const zoomToSession = useCallback((session: MeasurementSession) => {
+    if (fullChartData.length === 0) return;
+    
+    const startTs = session.startTime.getTime();
+    const endTs = session.endTime.getTime();
+    const minTs = fullChartData[0].timestamp;
+    const maxTs = fullChartData[fullChartData.length - 1].timestamp;
+    const totalRange = maxTs - minTs;
+    
+    const startPercent = Math.max(0, ((startTs - minTs) / totalRange) * 100 - 5);
+    const endPercent = Math.min(100, ((endTs - minTs) / totalRange) * 100 + 5);
+    
+    setZoomRange([startPercent, endPercent]);
+  }, [fullChartData]);
 
   if (loggers.length === 0 || chartData.length === 0) {
     return (
@@ -207,6 +290,52 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
             </CardTitle>
             
             <div className="flex items-center gap-2 flex-wrap">
+              {/* Zoom controls */}
+              <div className="flex items-center gap-1 border rounded-md p-1">
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomIn}>
+                  <ZoomIn className="w-4 h-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomOut}>
+                  <ZoomOut className="w-4 h-4" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleResetZoom}>
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {/* Save image dropdown */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Image className="w-4 h-4 mr-2" />
+                    이미지 저장
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => saveChartAsImage()}>
+                    <Download className="w-4 h-4 mr-2" />
+                    전체 그래프 저장
+                  </DropdownMenuItem>
+                  {sessions.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      {sessions.map(session => (
+                        <DropdownMenuItem 
+                          key={session.id}
+                          onClick={() => {
+                            zoomToSession(session);
+                            setTimeout(() => saveChartAsImage(session.id), 500);
+                          }}
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          {session.name} 저장
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+
               {!isSelectingSession ? (
                 <>
                   <Button 
@@ -277,6 +406,22 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
             </div>
           )}
           
+          {/* Zoom slider */}
+          <div className="flex items-center gap-4 px-2">
+            <Label className="text-xs text-muted-foreground shrink-0">확대/축소:</Label>
+            <Slider
+              value={zoomRange}
+              onValueChange={(value) => setZoomRange(value as [number, number])}
+              min={0}
+              max={100}
+              step={1}
+              className="flex-1"
+            />
+            <span className="text-xs text-muted-foreground shrink-0">
+              {Math.round(zoomRange[0])}% - {Math.round(zoomRange[1])}%
+            </span>
+          </div>
+          
           <div className="flex flex-wrap gap-2">
             {loggers.map((logger, idx) => (
               <Badge 
@@ -301,14 +446,15 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                 <Badge 
                   key={session.id} 
                   variant="secondary"
-                  className="flex items-center gap-1"
+                  className="flex items-center gap-1 cursor-pointer hover:bg-secondary/80"
+                  onClick={() => zoomToSession(session)}
                 >
                   {session.name}
                   {session.setTemperature && (
                     <span className="text-xs opacity-70">({session.setTemperature}℃)</span>
                   )}
                   <button 
-                    onClick={() => removeSession(session.id)}
+                    onClick={(e) => { e.stopPropagation(); removeSession(session.id); }}
                     className="ml-1 hover:text-destructive"
                   >
                     <Trash2 className="w-3 h-3" />
@@ -320,7 +466,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
         </div>
       </CardHeader>
       <CardContent>
-        <div className="h-[500px] w-full" style={{ cursor: isSelectingSession ? 'crosshair' : 'default' }}>
+        <div ref={chartRef} className="h-[450px] w-full bg-background p-2 rounded-lg" style={{ cursor: isSelectingSession ? 'crosshair' : 'default' }}>
           <ResponsiveContainer width="100%" height="100%">
             <LineChart 
               data={chartData} 
@@ -436,13 +582,6 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                   />
                 );
               })}
-              
-              <Brush 
-                dataKey="time" 
-                height={30} 
-                stroke="hsl(var(--primary))"
-                fill="hsl(var(--muted))"
-              />
             </LineChart>
           </ResponsiveContainer>
         </div>

@@ -21,6 +21,14 @@ const LOGGER_COLORS = [
 ];
 
 export function DataTable({ loggers, sessions }: DataTableProps) {
+  // Calculate column count for each logger
+  const loggerColumnCounts = useMemo(() => {
+    return loggers.map(logger => {
+      const hasFValue = logger.records.some(r => r.fValue !== undefined);
+      return hasFValue ? 4 : 3; // 날짜, 시간, 온도, (F value)
+    });
+  }, [loggers]);
+
   // Merge all logger data by index to create a horizontal table
   const mergedData = useMemo(() => {
     const maxRecords = Math.max(...loggers.map(l => l.records.length));
@@ -30,6 +38,7 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
         logger: DataLogger;
         record: typeof loggers[0]['records'][0] | null;
         colorIdx: number;
+        hasFValue: boolean;
       }>;
     }> = [];
 
@@ -40,6 +49,7 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
           logger,
           record: logger.records[i] || null,
           colorIdx,
+          hasFValue: logger.records.some(r => r.fValue !== undefined),
         })),
       });
     }
@@ -120,15 +130,16 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
           <div className="min-w-max">
             <Table>
               <TableHeader className="sticky top-0 bg-card z-10">
+                {/* Logger name row */}
                 <TableRow>
                   {loggers.map((logger, idx) => {
                     const colorStyle = LOGGER_COLORS[idx % LOGGER_COLORS.length];
-                    const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                    const colSpan = loggerColumnCounts[idx];
                     
                     return (
                       <TableHead 
                         key={logger.id}
-                        colSpan={hasFValue ? 4 : 3}
+                        colSpan={colSpan}
                         className={cn(
                           "text-center border-r last:border-r-0",
                           colorStyle.bg, colorStyle.text
@@ -139,19 +150,20 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
                     );
                   })}
                 </TableRow>
+                {/* Column headers row */}
                 <TableRow>
                   {loggers.map((logger, idx) => {
                     const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                    const isLast = idx === loggers.length - 1;
                     
                     return (
                       <React.Fragment key={`header-${logger.id}`}>
-                        <TableHead className="text-center w-24 border-l first:border-l-0">날짜</TableHead>
-                        <TableHead className="text-center w-20">시간</TableHead>
-                        <TableHead className="text-right w-20">온도(℃)</TableHead>
+                        <TableHead className="text-center w-20 text-xs border-l first:border-l-0">날짜</TableHead>
+                        <TableHead className="text-center w-16 text-xs">시간</TableHead>
+                        <TableHead className={cn("text-right w-16 text-xs", !hasFValue && !isLast && "border-r")}>온도(℃)</TableHead>
                         {hasFValue && (
-                          <TableHead className="text-right w-20 border-r">F value</TableHead>
+                          <TableHead className={cn("text-right w-16 text-xs", !isLast && "border-r")}>F value</TableHead>
                         )}
-                        {!hasFValue && <TableHead className="w-0 border-r p-0" />}
                       </React.Fragment>
                     );
                   })}
@@ -160,8 +172,8 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
               <TableBody>
                 {mergedData.map((row) => (
                   <TableRow key={row.index}>
-                    {row.loggerData.map(({ logger, record, colorIdx }) => {
-                      const hasFValue = logger.records.some(r => r.fValue !== undefined);
+                    {row.loggerData.map(({ logger, record, colorIdx, hasFValue }, loggerIdx) => {
+                      const isLast = loggerIdx === loggers.length - 1;
                       const highlightClass = record 
                         ? getRowHighlight(record.temperature, logger, colorIdx) 
                         : '';
@@ -169,32 +181,30 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
                       if (!record) {
                         return (
                           <React.Fragment key={`empty-${logger.id}-${row.index}`}>
-                            <TableCell className="text-center text-muted-foreground border-l first:border-l-0">-</TableCell>
-                            <TableCell className="text-center text-muted-foreground">-</TableCell>
-                            <TableCell className="text-right text-muted-foreground">-</TableCell>
-                            {hasFValue && <TableCell className="text-right border-r">-</TableCell>}
-                            {!hasFValue && <TableCell className="w-0 border-r p-0" />}
+                            <TableCell className="text-center text-muted-foreground text-xs border-l first:border-l-0">-</TableCell>
+                            <TableCell className="text-center text-muted-foreground text-xs">-</TableCell>
+                            <TableCell className={cn("text-right text-muted-foreground text-xs", !hasFValue && !isLast && "border-r")}>-</TableCell>
+                            {hasFValue && <TableCell className={cn("text-right text-xs", !isLast && "border-r")}>-</TableCell>}
                           </React.Fragment>
                         );
                       }
                       
                       return (
                         <React.Fragment key={`data-${logger.id}-${row.index}`}>
-                          <TableCell className={cn("text-center font-mono text-xs border-l first:border-l-0", highlightClass)}>
+                          <TableCell className={cn("text-center font-mono text-xs border-l first:border-l-0 py-1", highlightClass)}>
                             {record.date}
                           </TableCell>
-                          <TableCell className={cn("text-center font-mono text-xs", highlightClass)}>
+                          <TableCell className={cn("text-center font-mono text-xs py-1", highlightClass)}>
                             {record.time}
                           </TableCell>
-                          <TableCell className={cn("text-right font-mono text-sm font-medium", highlightClass)}>
+                          <TableCell className={cn("text-right font-mono text-xs py-1", highlightClass, !hasFValue && !isLast && "border-r")}>
                             {record.temperature.toFixed(2)}
                           </TableCell>
                           {hasFValue && (
-                            <TableCell className={cn("text-right font-mono text-xs border-r", highlightClass)}>
+                            <TableCell className={cn("text-right font-mono text-xs py-1", highlightClass, !isLast && "border-r")}>
                               {record.fValue?.toFixed(2) || ''}
                             </TableCell>
                           )}
-                          {!hasFValue && <TableCell className="w-0 border-r p-0" />}
                         </React.Fragment>
                       );
                     })}
@@ -209,4 +219,3 @@ export function DataTable({ loggers, sessions }: DataTableProps) {
     </Card>
   );
 }
-

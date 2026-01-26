@@ -10,7 +10,7 @@ import { TemperatureChart } from "@/components/TemperatureChart";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Thermometer, RefreshCw, Settings, Database, BarChart3, TrendingUp } from "lucide-react";
+import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp } from "lucide-react";
 
 const Index = () => {
   const [loggers, setLoggers] = useState<DataLogger[]>([]);
@@ -29,6 +29,12 @@ const Index = () => {
   const handleUpdateLogger = useCallback((loggerId: string, updates: Partial<DataLogger>) => {
     setLoggers(prev => 
       prev.map(l => l.id === loggerId ? { ...l, ...updates } : l)
+    );
+  }, []);
+
+  const handleUpdateSession = useCallback((sessionId: number, updates: Partial<MeasurementSession>) => {
+    setSessions(prev =>
+      prev.map(s => s.id === sessionId ? { ...s, ...updates } : s)
     );
   }, []);
 
@@ -101,10 +107,10 @@ const Index = () => {
               
               <div className="p-4 rounded-lg border bg-card text-center">
                 <div className="p-3 rounded-full bg-primary/20 w-fit mx-auto mb-3">
-                  <Settings className="w-5 h-5 text-primary" />
+                  <Database className="w-5 h-5 text-primary" />
                 </div>
-                <h3 className="font-medium mb-1">개별 설정</h3>
-                <p className="text-sm text-muted-foreground">로거별 열수/품온 지정</p>
+                <h3 className="font-medium mb-1">회차별 설정</h3>
+                <p className="text-sm text-muted-foreground">열수 온도 개별 지정</p>
               </div>
             </div>
           </div>
@@ -112,14 +118,10 @@ const Index = () => {
           <div className="grid gap-6 lg:grid-cols-4">
             <div className="lg:col-span-3">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-                <TabsList className="grid w-full grid-cols-4 lg:w-auto lg:inline-grid">
+                <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:inline-grid">
                   <TabsTrigger value="chart" className="gap-2">
                     <TrendingUp className="w-4 h-4" />
-                    <span className="hidden sm:inline">그래프</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="config" className="gap-2">
-                    <Settings className="w-4 h-4" />
-                    <span className="hidden sm:inline">설정</span>
+                    <span className="hidden sm:inline">그래프 / 설정</span>
                   </TabsTrigger>
                   <TabsTrigger value="data" className="gap-2">
                     <Database className="w-4 h-4" />
@@ -131,16 +133,18 @@ const Index = () => {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="chart">
+                <TabsContent value="chart" className="space-y-6">
                   <TemperatureChart 
                     loggers={loggers} 
                     sessions={sessions}
                     onSessionsChange={setSessions}
                   />
-                </TabsContent>
-
-                <TabsContent value="config">
-                  <LoggerConfig loggers={loggers} onUpdateLogger={handleUpdateLogger} />
+                  <LoggerConfig 
+                    loggers={loggers} 
+                    sessions={sessions}
+                    onUpdateLogger={handleUpdateLogger} 
+                    onUpdateSession={handleUpdateSession}
+                  />
                 </TabsContent>
 
                 <TabsContent value="data">
