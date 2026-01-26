@@ -9,7 +9,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
   ResponsiveContainer, ReferenceLine, ReferenceArea, Brush
 } from "recharts";
-import { TrendingUp, Scissors, Trash2, Check, MousePointer } from "lucide-react";
+import { TrendingUp, Scissors, Trash2, Check, MousePointer, ArrowRight } from "lucide-react";
 import { formatDateTime } from "@/utils/csvParser";
 
 interface TemperatureChartProps {
@@ -31,6 +31,10 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [newSessionName, setNewSessionName] = useState("");
+  const [newSessionSetTemp, setNewSessionSetTemp] = useState<string>("");
+
+  // Check if any logger is hotwater type
+  const hasHotwaterLogger = loggers.some(l => l.type === 'hotwater');
 
   // Use first logger as primary timeline (all loggers should have same timestamps)
   const primaryLogger = loggers[0];
@@ -76,6 +80,22 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     [loggers]
   );
 
+  // Get last session's end time for "continue from here" feature
+  const lastSessionEndTime = useMemo(() => {
+    if (sessions.length === 0) return null;
+    const sortedSessions = [...sessions].sort((a, b) => b.endTime.getTime() - a.endTime.getTime());
+    return sortedSessions[0].endTime.getTime();
+  }, [sessions]);
+
+  // Start new session from last session's end
+  const startFromLastSession = useCallback(() => {
+    if (lastSessionEndTime) {
+      setSelectionStart(lastSessionEndTime);
+      setSelectionEnd(null);
+      setIsSelectingSession(true);
+    }
+  }, [lastSessionEndTime]);
+
   // Click-based selection: first click = start, second click = end
   const handleChartClick = useCallback((e: any) => {
     if (!isSelectingSession) return;
@@ -103,11 +123,24 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
     
+    // Check for overlap with existing sessions
+    const hasOverlap = sessions.some(session => {
+      const sessionStart = session.startTime.getTime();
+      const sessionEnd = session.endTime.getTime();
+      return (start < sessionEnd && end > sessionStart);
+    });
+    
+    if (hasOverlap) {
+      alert("선택한 구간이 기존 회차와 겹칩니다. 겹치지 않게 선택해주세요.");
+      return;
+    }
+    
     const newSession: MeasurementSession = {
       id: sessions.length + 1,
       name: newSessionName || `${sessions.length + 1}차 측정`,
       startTime: new Date(start),
       endTime: new Date(end),
+      setTemperature: newSessionSetTemp ? parseFloat(newSessionSetTemp) : undefined,
     };
     
     onSessionsChange([...sessions, newSession]);
@@ -115,13 +148,15 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     setSelectionStart(null);
     setSelectionEnd(null);
     setNewSessionName("");
-  }, [selectionStart, selectionEnd, sessions, newSessionName, onSessionsChange]);
+    setNewSessionSetTemp("");
+  }, [selectionStart, selectionEnd, sessions, newSessionName, newSessionSetTemp, onSessionsChange]);
 
   const cancelSelection = useCallback(() => {
     setIsSelectingSession(false);
     setSelectionStart(null);
     setSelectionEnd(null);
     setNewSessionName("");
+    setNewSessionSetTemp("");
   }, []);
 
   const removeSession = useCallback((sessionId: number) => {
@@ -173,22 +208,43 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
             
             <div className="flex items-center gap-2 flex-wrap">
               {!isSelectingSession ? (
-                <Button 
-                  size="sm" 
-                  variant="outline"
-                  onClick={() => setIsSelectingSession(true)}
-                >
-                  <Scissors className="w-4 h-4 mr-2" />
-                  회차 분할
-                </Button>
+                <>
+                  <Button 
+                    size="sm" 
+                    variant="outline"
+                    onClick={() => setIsSelectingSession(true)}
+                  >
+                    <Scissors className="w-4 h-4 mr-2" />
+                    회차 분할
+                  </Button>
+                  {lastSessionEndTime && (
+                    <Button 
+                      size="sm" 
+                      variant="outline"
+                      onClick={startFromLastSession}
+                    >
+                      <ArrowRight className="w-4 h-4 mr-2" />
+                      이어서 분할
+                    </Button>
+                  )}
+                </>
               ) : (
                 <div className="flex items-center gap-2 flex-wrap">
                   <Input
                     placeholder="회차 이름"
                     value={newSessionName}
                     onChange={(e) => setNewSessionName(e.target.value)}
-                    className="h-8 w-28"
+                    className="h-8 w-24"
                   />
+                  {hasHotwaterLogger && (
+                    <Input
+                      placeholder="열수 설정온도"
+                      type="number"
+                      value={newSessionSetTemp}
+                      onChange={(e) => setNewSessionSetTemp(e.target.value)}
+                      className="h-8 w-28"
+                    />
+                  )}
                   <Button 
                     size="sm" 
                     onClick={confirmSession}
@@ -248,6 +304,9 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                   className="flex items-center gap-1"
                 >
                   {session.name}
+                  {session.setTemperature && (
+                    <span className="text-xs opacity-70">({session.setTemperature}℃)</span>
+                  )}
                   <button 
                     onClick={() => removeSession(session.id)}
                     className="ml-1 hover:text-destructive"

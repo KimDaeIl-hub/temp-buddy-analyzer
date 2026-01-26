@@ -29,11 +29,13 @@ export function calculateHotWaterResults(
 
 export function calculateProductResults(
   records: TemperatureRecord[],
-  sterilizationType: 'pasteurization' | 'sterilization'
+  sterilizationType: 'pasteurization' | 'sterilization',
+  previousSessionEndFValue?: number
 ): { 
   averageTemp: number; 
   durationMinutes: number;
   maxFValue: number;
+  sessionFValue: number;
   f63Minutes: number;
   f121Minutes: number;
   qualifyingRecords: TemperatureRecord[];
@@ -46,6 +48,7 @@ export function calculateProductResults(
       averageTemp: 0, 
       durationMinutes: 0, 
       maxFValue: 0,
+      sessionFValue: 0,
       f63Minutes: 0,
       f121Minutes: 0,
       qualifyingRecords: [] 
@@ -62,8 +65,29 @@ export function calculateProductResults(
     durationMinutes = (lastTime - firstTime) / (1000 * 60);
   }
   
-  // Get max F-value from records
-  const maxFValue = Math.max(...records.map(r => r.fValue || 0));
+  // Get F-values from records that have them
+  const recordsWithFValue = records.filter(r => r.fValue !== undefined && r.fValue !== null);
+  
+  // Get max F-value in this session
+  const maxFValue = recordsWithFValue.length > 0 
+    ? Math.max(...recordsWithFValue.map(r => r.fValue!)) 
+    : 0;
+  
+  // Get the F-value at the end of this session (last record with F-value)
+  const endFValue = recordsWithFValue.length > 0 
+    ? recordsWithFValue[recordsWithFValue.length - 1].fValue! 
+    : 0;
+  
+  // Get the F-value at the start of this session (first record with F-value)
+  const startFValue = recordsWithFValue.length > 0 
+    ? recordsWithFValue[0].fValue! 
+    : 0;
+  
+  // Calculate session F-value: difference between end and start F-value of this session
+  // If previousSessionEndFValue is provided, subtract it from the start
+  const sessionFValue = previousSessionEndFValue !== undefined
+    ? endFValue - previousSessionEndFValue
+    : endFValue - startFValue + (recordsWithFValue.length > 0 ? recordsWithFValue[0].fValue! : 0);
   
   // Calculate F63 and F121 based on temperature thresholds
   const f63Records = records.filter(r => r.temperature >= 63);
@@ -87,6 +111,7 @@ export function calculateProductResults(
     averageTemp, 
     durationMinutes, 
     maxFValue,
+    sessionFValue: Math.max(0, endFValue - (previousSessionEndFValue || 0)),
     f63Minutes,
     f121Minutes,
     qualifyingRecords 
@@ -102,21 +127,43 @@ export function getRecordsInSession(
   );
 }
 
+// Get F-value at the end of a session for a logger
+export function getSessionEndFValue(
+  records: TemperatureRecord[],
+  session: MeasurementSession
+): number | undefined {
+  const sessionRecords = getRecordsInSession(records, session);
+  const recordsWithFValue = sessionRecords.filter(r => r.fValue !== undefined && r.fValue !== null);
+  if (recordsWithFValue.length === 0) return undefined;
+  return recordsWithFValue[recordsWithFValue.length - 1].fValue;
+}
+
 export function calculateSessionResults(
   logger: DataLogger,
   sessions: MeasurementSession[]
 ): CalculationResult[] {
   const results: CalculationResult[] = [];
   
-  sessions.forEach((session) => {
+  // Sort sessions by start time to calculate cumulative F-values correctly
+  const sortedSessions = [...sessions].sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
+  
+  // Track previous session's end F-value for each logger
+  let previousEndFValue: number | undefined = undefined;
+  
+  sortedSessions.forEach((session) => {
     const sessionRecords = getRecordsInSession(logger.records, session);
     
     if (sessionRecords.length === 0) return;
     
-    if (logger.type === 'hotwater' && logger.setTemperature) {
+    if (logger.type === 'hotwater') {
+      // Use session's setTemperature if available, otherwise use logger's setTemperature
+      const setTemperature = session.setTemperature || logger.setTemperature;
+      
+      if (!setTemperature) return;
+      
       const { averageTemp, durationMinutes } = calculateHotWaterResults(
         sessionRecords,
-        logger.setTemperature
+        setTemperature
       );
       
       results.push({
@@ -129,11 +176,19 @@ export function calculateSessionResults(
         durationMinutes,
         maxFValue: 0,
         recordCount: sessionRecords.length,
-        threshold: logger.setTemperature - 2.4,
+        threshold: setTemperature - 2.4,
       });
     } else if (logger.type === 'product') {
-      const { averageTemp, durationMinutes, maxFValue, f63Minutes, f121Minutes } = 
-        calculateProductResults(sessionRecords, logger.sterilizationType || 'pasteurization');
+      const sterilizationType = logger.sterilizationType || 'pasteurization';
+      
+      const { averageTemp, durationMinutes, maxFValue, sessionFValue, f63Minutes, f121Minutes } = 
+        calculateProductResults(sessionRecords, sterilizationType, previousEndFValue);
+      
+      // Update previousEndFValue for next session
+      const currentEndFValue = getSessionEndFValue(logger.records, session);
+      if (currentEndFValue !== undefined) {
+        previousEndFValue = currentEndFValue;
+      }
       
       results.push({
         loggerId: logger.id,
@@ -144,10 +199,12 @@ export function calculateSessionResults(
         averageTemp,
         durationMinutes,
         maxFValue,
+        sessionFValue,
         f63Minutes,
         f121Minutes,
         recordCount: sessionRecords.length,
         threshold: 63,
+        sterilizationType,
       });
     }
   });
