@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useMemo, useState, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,11 +8,11 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  ResponsiveContainer, ReferenceLine, ReferenceArea
+  ResponsiveContainer, ReferenceLine, ReferenceArea, Area
 } from "recharts";
 import { 
   TrendingUp, Scissors, Trash2, Check, MousePointer, ArrowRight, 
-  Download, ZoomIn, ZoomOut, RotateCcw, Image
+  Download, ZoomIn, ZoomOut, RotateCcw, Image, Target
 } from "lucide-react";
 import { formatDateTime } from "@/utils/csvParser";
 import html2canvas from "html2canvas";
@@ -31,14 +31,27 @@ interface TemperatureChartProps {
 }
 
 const LOGGER_COLORS = [
-  '#0ea5e9', // sky-500
-  '#22c55e', // green-500
-  '#f97316', // orange-500
-  '#a855f7', // purple-500
+  '#3b82f6', // blue-500 - primary
+  '#10b981', // emerald-500
+  '#f59e0b', // amber-500
+  '#8b5cf6', // violet-500
   '#ef4444', // red-500
 ];
 
-export function TemperatureChart({ loggers, sessions, onSessionsChange }: TemperatureChartProps) {
+const LOGGER_GRADIENTS = [
+  { start: 'rgba(59, 130, 246, 0.3)', end: 'rgba(59, 130, 246, 0.05)' },
+  { start: 'rgba(16, 185, 129, 0.3)', end: 'rgba(16, 185, 129, 0.05)' },
+  { start: 'rgba(245, 158, 11, 0.3)', end: 'rgba(245, 158, 11, 0.05)' },
+  { start: 'rgba(139, 92, 246, 0.3)', end: 'rgba(139, 92, 246, 0.05)' },
+  { start: 'rgba(239, 68, 68, 0.3)', end: 'rgba(239, 68, 68, 0.05)' },
+];
+
+export interface TemperatureChartRef {
+  chartRef: React.RefObject<HTMLDivElement>;
+}
+
+export const TemperatureChart = forwardRef<TemperatureChartRef, TemperatureChartProps>(
+  ({ loggers, sessions, onSessionsChange }, ref) => {
   const [isSelectingSession, setIsSelectingSession] = useState(false);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
@@ -48,6 +61,11 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   // Zoom state
   const [zoomRange, setZoomRange] = useState<[number, number]>([0, 100]);
   const chartRef = useRef<HTMLDivElement>(null);
+
+  // Expose chartRef through imperative handle
+  useImperativeHandle(ref, () => ({
+    chartRef
+  }));
 
   // Check if any logger is hotwater type
   const hasHotwaterLogger = loggers.some(l => l.type === 'hotwater');
@@ -190,11 +208,11 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
 
   const getSessionColor = (index: number) => {
     const colors = [
-      'rgba(59, 130, 246, 0.15)', 
-      'rgba(16, 185, 129, 0.15)', 
-      'rgba(245, 158, 11, 0.15)', 
-      'rgba(239, 68, 68, 0.15)',
-      'rgba(168, 85, 247, 0.15)'
+      'rgba(59, 130, 246, 0.12)', 
+      'rgba(16, 185, 129, 0.12)', 
+      'rgba(245, 158, 11, 0.12)', 
+      'rgba(239, 68, 68, 0.12)',
+      'rgba(139, 92, 246, 0.12)'
     ];
     return colors[index % colors.length];
   };
@@ -269,6 +287,37 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
     setZoomRange([startPercent, endPercent]);
   }, [fullChartData]);
 
+  // Custom tooltip
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-card/95 backdrop-blur-sm border rounded-lg shadow-lg p-3 min-w-[180px]">
+          <p className="text-xs text-muted-foreground mb-2 border-b pb-2">
+            {payload[0]?.payload?.fullTime || label}
+          </p>
+          <div className="space-y-1.5">
+            {payload.map((entry: any, index: number) => (
+              <div key={index} className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <div 
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{ backgroundColor: entry.color }}
+                  />
+                  <span className="text-xs">{entry.name}</span>
+                </div>
+                <span className="text-xs font-mono font-medium">
+                  {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
+                  {entry.dataKey?.startsWith('temp') ? '°C' : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   if (loggers.length === 0 || chartData.length === 0) {
     return (
       <Card className="bg-card">
@@ -280,25 +329,30 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
   }
 
   return (
-    <Card className="bg-card">
-      <CardHeader className="pb-3">
+    <Card className="bg-card overflow-hidden">
+      <CardHeader className="pb-3 border-b bg-muted/30">
         <div className="flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="w-4 h-4 text-primary" />
-              온도 그래프 ({loggers.length}개 로거)
+              <div className="p-1.5 rounded-lg bg-primary/10">
+                <TrendingUp className="w-4 h-4 text-primary" />
+              </div>
+              <span>Temperature Profile Trend</span>
+              <Badge variant="outline" className="ml-2 font-normal">
+                {loggers.length} Loggers
+              </Badge>
             </CardTitle>
             
             <div className="flex items-center gap-2 flex-wrap">
               {/* Zoom controls */}
-              <div className="flex items-center gap-1 border rounded-md p-1">
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomIn}>
+              <div className="flex items-center gap-1 border rounded-lg p-1 bg-background">
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomIn} title="확대">
                   <ZoomIn className="w-4 h-4" />
                 </Button>
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomOut}>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleZoomOut} title="축소">
                   <ZoomOut className="w-4 h-4" />
                 </Button>
-                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleResetZoom}>
+                <Button size="icon" variant="ghost" className="h-7 w-7" onClick={handleResetZoom} title="초기화">
                   <RotateCcw className="w-4 h-4" />
                 </Button>
               </div>
@@ -308,7 +362,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                 <DropdownMenuTrigger asChild>
                   <Button size="sm" variant="outline">
                     <Image className="w-4 h-4 mr-2" />
-                    이미지 저장
+                    이미지
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -353,7 +407,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
                       onClick={startFromLastSession}
                     >
                       <ArrowRight className="w-4 h-4 mr-2" />
-                      이어서 분할
+                      이어서
                     </Button>
                   )}
                 </>
@@ -408,7 +462,7 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
           
           {/* Zoom slider */}
           <div className="flex items-center gap-4 px-2">
-            <Label className="text-xs text-muted-foreground shrink-0">확대/축소:</Label>
+            <Label className="text-xs text-muted-foreground shrink-0">범위:</Label>
             <Slider
               value={zoomRange}
               onValueChange={(value) => setZoomRange(value as [number, number])}
@@ -417,175 +471,244 @@ export function TemperatureChart({ loggers, sessions, onSessionsChange }: Temper
               step={1}
               className="flex-1"
             />
-            <span className="text-xs text-muted-foreground shrink-0">
+            <span className="text-xs text-muted-foreground shrink-0 font-mono">
               {Math.round(zoomRange[0])}% - {Math.round(zoomRange[1])}%
             </span>
           </div>
-          
-          <div className="flex flex-wrap gap-2">
-            {loggers.map((logger, idx) => (
-              <Badge 
-                key={logger.id} 
-                variant="outline"
-                style={{ 
-                  borderColor: LOGGER_COLORS[idx % LOGGER_COLORS.length], 
-                  color: LOGGER_COLORS[idx % LOGGER_COLORS.length],
-                  backgroundColor: `${LOGGER_COLORS[idx % LOGGER_COLORS.length]}15`
-                }}
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="flex">
+          {/* Main Chart Area */}
+          <div ref={chartRef} className="flex-1 h-[420px] bg-gradient-to-b from-background to-muted/20 p-4" style={{ cursor: isSelectingSession ? 'crosshair' : 'default' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart 
+                data={chartData} 
+                margin={{ top: 10, right: hasFValue ? 60 : 20, left: 10, bottom: 10 }}
+                onClick={handleChartClick}
               >
-                {logger.name}
-                {logger.records.some(r => r.fValue !== undefined) && ' (F값)'}
-              </Badge>
-            ))}
+                <defs>
+                  {loggers.map((_, idx) => (
+                    <linearGradient key={`gradient-${idx}`} id={`colorTemp${idx}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={LOGGER_COLORS[idx % LOGGER_COLORS.length]} stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor={LOGGER_COLORS[idx % LOGGER_COLORS.length]} stopOpacity={0.05}/>
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+                <XAxis 
+                  dataKey="time" 
+                  tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} 
+                  tickLine={{ stroke: 'hsl(var(--border))' }}
+                  axisLine={{ stroke: 'hsl(var(--border))' }}
+                  interval="preserveStartEnd"
+                />
+                <YAxis 
+                  yAxisId="temp"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                  tickLine={{ stroke: 'hsl(var(--border))' }}
+                  axisLine={{ stroke: 'hsl(var(--border))' }}
+                  label={{ 
+                    value: 'Temperature (°C)', 
+                    angle: -90, 
+                    position: 'insideLeft', 
+                    style: { fontSize: 11, fill: 'hsl(var(--muted-foreground))' } 
+                  }}
+                />
+                {hasFValue && (
+                  <YAxis 
+                    yAxisId="fvalue"
+                    orientation="right"
+                    domain={['auto', 'auto']}
+                    tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                    tickLine={{ stroke: 'hsl(var(--border))' }}
+                    axisLine={{ stroke: 'hsl(var(--border))' }}
+                    label={{ 
+                      value: 'F-Value', 
+                      angle: 90, 
+                      position: 'insideRight', 
+                      style: { fontSize: 11, fill: 'hsl(var(--muted-foreground))' } 
+                    }}
+                  />
+                )}
+                <Tooltip content={<CustomTooltip />} />
+                <Legend 
+                  wrapperStyle={{ paddingTop: '10px' }}
+                  formatter={(value) => <span className="text-xs">{value}</span>}
+                />
+                
+                {/* Session reference areas */}
+                {sessions.map((session, idx) => (
+                  <ReferenceArea
+                    key={session.id}
+                    yAxisId="temp"
+                    x1={findChartTimeForTimestamp(session.startTime.getTime())}
+                    x2={findChartTimeForTimestamp(session.endTime.getTime())}
+                    fill={getSessionColor(idx)}
+                    stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]}
+                    strokeWidth={1}
+                    strokeOpacity={0.5}
+                    label={{ 
+                      value: session.name, 
+                      position: 'insideTop',
+                      style: { fontSize: 10, fontWeight: 600, fill: 'hsl(var(--foreground))' }
+                    }}
+                  />
+                ))}
+                
+                {/* Current selection area */}
+                {isSelectingSession && selectionStart !== null && selectionEnd !== null && (
+                  <ReferenceArea
+                    yAxisId="temp"
+                    x1={findChartTimeForTimestamp(Math.min(selectionStart, selectionEnd))}
+                    x2={findChartTimeForTimestamp(Math.max(selectionStart, selectionEnd))}
+                    fill="rgba(59, 130, 246, 0.25)"
+                    stroke="#3b82f6"
+                    strokeWidth={2}
+                  />
+                )}
+                
+                {/* Reference lines for thresholds */}
+                <ReferenceLine 
+                  y={63} 
+                  yAxisId="temp"
+                  stroke="#22c55e" 
+                  strokeDasharray="6 4"
+                  strokeWidth={1.5}
+                  label={{ 
+                    value: 'Target (63°C)', 
+                    position: 'right',
+                    style: { fontSize: 9, fill: '#22c55e', fontWeight: 500 }
+                  }}
+                />
+                
+                {/* Temperature lines for each logger */}
+                {loggers.map((logger, idx) => (
+                  <Line 
+                    key={`temp-${logger.id}`}
+                    yAxisId="temp"
+                    type="monotone" 
+                    dataKey={`temp_${idx}`} 
+                    name={`${logger.name}`}
+                    stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={{ r: 5, strokeWidth: 2, fill: 'white' }}
+                    connectNulls
+                  />
+                ))}
+                
+                {/* F-value lines for loggers that have it */}
+                {hasFValue && loggers.map((logger, idx) => {
+                  const hasLoggerFValue = logger.records.some(r => r.fValue !== undefined);
+                  if (!hasLoggerFValue) return null;
+                  return (
+                    <Line 
+                      key={`fvalue-${logger.id}`}
+                      yAxisId="fvalue"
+                      type="monotone" 
+                      dataKey={`fvalue_${idx}`} 
+                      name={`${logger.name} F값`}
+                      stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
+                      strokeWidth={1.5}
+                      strokeDasharray="5 5"
+                      dot={false}
+                      activeDot={{ r: 3 }}
+                      connectNulls
+                      opacity={0.7}
+                    />
+                  );
+                })}
+              </LineChart>
+            </ResponsiveContainer>
           </div>
-          
+
+          {/* Stats Sidebar */}
           {sessions.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              <Label className="text-sm text-muted-foreground self-center">측정 회차:</Label>
-              {sessions.map((session) => (
-                <Badge 
-                  key={session.id} 
-                  variant="secondary"
-                  className="flex items-center gap-1 cursor-pointer hover:bg-secondary/80"
-                  onClick={() => zoomToSession(session)}
-                >
-                  {session.name}
+            <div className="w-48 border-l bg-muted/30 p-3 space-y-3">
+              <div className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5" />
+                Validation Stats
+              </div>
+              {sessions.slice(0, 3).map((session, idx) => (
+                <div key={session.id} className="p-2.5 rounded-lg border bg-card text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium truncate">{session.name}</span>
+                    <button 
+                      onClick={() => removeSession(session.id)}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-1.5 rounded bg-muted/50 text-center">
+                      <div className="text-[10px] text-muted-foreground">시작</div>
+                      <div className="font-mono text-[11px]">
+                        {session.startTime.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    <div className="p-1.5 rounded bg-muted/50 text-center">
+                      <div className="text-[10px] text-muted-foreground">종료</div>
+                      <div className="font-mono text-[11px]">
+                        {session.endTime.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                  </div>
                   {session.setTemperature && (
-                    <span className="text-xs opacity-70">({session.setTemperature}℃)</span>
+                    <div className="p-1.5 rounded bg-sky-500/10 text-center">
+                      <div className="text-[10px] text-muted-foreground">열수 설정</div>
+                      <div className="font-mono text-sky-600 font-medium">{session.setTemperature}°C</div>
+                    </div>
                   )}
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); removeSession(session.id); }}
-                    className="ml-1 hover:text-destructive"
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full h-6 text-[10px]"
+                    onClick={() => zoomToSession(session)}
                   >
-                    <Trash2 className="w-3 h-3" />
-                  </button>
-                </Badge>
+                    <ZoomIn className="w-3 h-3 mr-1" />
+                    확대 보기
+                  </Button>
+                </div>
               ))}
+              {sessions.length > 3 && (
+                <div className="text-center text-xs text-muted-foreground">
+                  +{sessions.length - 3} more sessions
+                </div>
+              )}
             </div>
           )}
         </div>
-      </CardHeader>
-      <CardContent>
-        <div ref={chartRef} className="h-[450px] w-full bg-background p-2 rounded-lg" style={{ cursor: isSelectingSession ? 'crosshair' : 'default' }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart 
-              data={chartData} 
-              margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              onClick={handleChartClick}
+
+        {/* Logger Legend */}
+        <div className="flex flex-wrap gap-2 p-3 border-t bg-muted/20">
+          {loggers.map((logger, idx) => (
+            <Badge 
+              key={logger.id} 
+              variant="outline"
+              className="gap-1.5 px-2.5 py-1"
+              style={{ 
+                borderColor: LOGGER_COLORS[idx % LOGGER_COLORS.length], 
+                color: LOGGER_COLORS[idx % LOGGER_COLORS.length],
+                backgroundColor: `${LOGGER_COLORS[idx % LOGGER_COLORS.length]}10`
+              }}
             >
-              <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
-              <XAxis 
-                dataKey="time" 
-                tick={{ fontSize: 10 }} 
-                interval="preserveStartEnd"
+              <div 
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: LOGGER_COLORS[idx % LOGGER_COLORS.length] }}
               />
-              <YAxis 
-                yAxisId="temp"
-                domain={['auto', 'auto']}
-                tick={{ fontSize: 11 }}
-                label={{ value: '온도 (℃)', angle: -90, position: 'insideLeft', style: { fontSize: 12 } }}
-              />
-              {hasFValue && (
-                <YAxis 
-                  yAxisId="fvalue"
-                  orientation="right"
-                  domain={['auto', 'auto']}
-                  tick={{ fontSize: 11 }}
-                  label={{ value: 'F Value', angle: 90, position: 'insideRight', style: { fontSize: 12 } }}
-                />
+              {logger.name}
+              {logger.records.some(r => r.fValue !== undefined) && (
+                <span className="text-[10px] opacity-70">(F값)</span>
               )}
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: 'hsl(var(--card))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: 'var(--radius)',
-                }}
-                labelStyle={{ color: 'hsl(var(--foreground))' }}
-                labelFormatter={(_, payload) => payload[0]?.payload?.fullTime || ''}
-              />
-              <Legend />
-              
-              {/* Session reference areas */}
-              {sessions.map((session, idx) => (
-                <ReferenceArea
-                  key={session.id}
-                  yAxisId="temp"
-                  x1={findChartTimeForTimestamp(session.startTime.getTime())}
-                  x2={findChartTimeForTimestamp(session.endTime.getTime())}
-                  fill={getSessionColor(idx)}
-                  label={{ 
-                    value: session.name, 
-                    position: 'insideTop',
-                    style: { fontSize: 11, fontWeight: 500 }
-                  }}
-                />
-              ))}
-              
-              {/* Current selection area */}
-              {isSelectingSession && selectionStart !== null && selectionEnd !== null && (
-                <ReferenceArea
-                  yAxisId="temp"
-                  x1={findChartTimeForTimestamp(Math.min(selectionStart, selectionEnd))}
-                  x2={findChartTimeForTimestamp(Math.max(selectionStart, selectionEnd))}
-                  fill="rgba(59, 130, 246, 0.3)"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                />
-              )}
-              
-              {/* Reference lines for thresholds */}
-              <ReferenceLine 
-                y={63} 
-                yAxisId="temp"
-                stroke="#22c55e" 
-                strokeDasharray="5 5"
-                label={{ 
-                  value: '63℃', 
-                  position: 'right',
-                  style: { fontSize: 10, fill: '#22c55e' }
-                }}
-              />
-              
-              {/* Temperature lines for each logger */}
-              {loggers.map((logger, idx) => (
-                <Line 
-                  key={`temp-${logger.id}`}
-                  yAxisId="temp"
-                  type="monotone" 
-                  dataKey={`temp_${idx}`} 
-                  name={`${logger.name}`}
-                  stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                  connectNulls
-                />
-              ))}
-              
-              {/* F-value lines for loggers that have it */}
-              {hasFValue && loggers.map((logger, idx) => {
-                const hasLoggerFValue = logger.records.some(r => r.fValue !== undefined);
-                if (!hasLoggerFValue) return null;
-                return (
-                  <Line 
-                    key={`fvalue-${logger.id}`}
-                    yAxisId="fvalue"
-                    type="monotone" 
-                    dataKey={`fvalue_${idx}`} 
-                    name={`${logger.name} F값`}
-                    stroke={LOGGER_COLORS[idx % LOGGER_COLORS.length]} 
-                    strokeWidth={1.5}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    activeDot={{ r: 3 }}
-                    connectNulls
-                  />
-                );
-              })}
-            </LineChart>
-          </ResponsiveContainer>
+            </Badge>
+          ))}
         </div>
       </CardContent>
     </Card>
   );
-}
+});
+
+TemperatureChart.displayName = "TemperatureChart";
