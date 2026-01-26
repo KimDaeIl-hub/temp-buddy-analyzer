@@ -286,6 +286,15 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
     return filteredData;
   }, [files, resultFilters]);
 
+  // Format time for chart display
+  const formatTimeForChart = (timestamp: Date): string => {
+    return timestamp.toLocaleTimeString('ko-KR', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+
   // Render mini charts for filtered data
   const renderFilteredCharts = useCallback(async (pdf: jsPDF, yPos: number, margin: number, pageWidth: number): Promise<number> => {
     const filteredData = getFilteredChartData();
@@ -307,30 +316,42 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       const session = firstItem.session;
       const file = firstItem.file;
       
-      // Create chart container
+      // Create chart container - larger for better quality
       const chartContainer = document.createElement('div');
-      chartContainer.style.width = '600px';
-      chartContainer.style.height = '250px';
+      chartContainer.style.width = '800px';
+      chartContainer.style.height = '350px';
       chartContainer.style.position = 'absolute';
       chartContainer.style.left = '-9999px';
       chartContainer.style.backgroundColor = 'white';
       document.body.appendChild(chartContainer);
 
-      // Prepare data
+      // Prepare data with ALL records (no sampling to show full session)
       const chartData: any[] = [];
       const maxLength = Math.max(...items.map(item => item.records.length));
       
+      // Determine sampling rate based on data size (sample every Nth point for readability)
+      const sampleRate = maxLength > 500 ? Math.ceil(maxLength / 200) : 
+                         maxLength > 200 ? Math.ceil(maxLength / 100) : 1;
+      
       for (let i = 0; i < maxLength; i++) {
-        const dataPoint: any = { index: i };
-        items.forEach((item, idx) => {
-          if (item.records[i]) {
-            dataPoint[`temp${idx}`] = item.records[i].temperature;
-            if (item.records[i].fValue !== undefined) {
-              dataPoint[`fvalue${idx}`] = item.records[i].fValue;
+        if (i % sampleRate === 0 || i === maxLength - 1) {
+          const dataPoint: any = { index: i };
+          
+          // Use actual timestamp from first item with data at this index
+          let timestamp: Date | null = null;
+          items.forEach((item, idx) => {
+            if (item.records[i]) {
+              dataPoint[`temp${idx}`] = item.records[i].temperature;
+              if (item.records[i].fValue !== undefined) {
+                dataPoint[`fvalue${idx}`] = item.records[i].fValue;
+              }
+              if (!timestamp && item.records[i].timestamp) {
+                timestamp = item.records[i].timestamp;
+              }
             }
-          }
-        });
-        if (i % 5 === 0) { // Sample every 5th point for smaller charts
+          });
+          
+          dataPoint.time = timestamp ? formatTimeForChart(timestamp) : `${i}`;
           chartData.push(dataPoint);
         }
       }
@@ -341,15 +362,26 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       
       await new Promise<void>((resolve) => {
         root.render(
-          <div style={{ width: '100%', height: '100%', padding: '10px', backgroundColor: 'white' }}>
-            <div style={{ fontSize: '12px', fontWeight: 'bold', marginBottom: '8px' }}>
+          <div style={{ width: '100%', height: '100%', padding: '15px', backgroundColor: 'white' }}>
+            <div style={{ fontSize: '14px', fontWeight: 'bold', marginBottom: '10px', textAlign: 'center' }}>
               {sanitizeForPDF(files.length > 1 ? `[${file.name.replace('.csv', '')}] ${session.name}` : session.name)}
             </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+            <ResponsiveContainer width="100%" height={280}>
+              <LineChart data={chartData} margin={{ top: 10, right: 30, left: 20, bottom: 30 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="index" tick={{ fontSize: 10 }} />
-                <YAxis domain={['auto', 'auto']} tick={{ fontSize: 10 }} />
+                <XAxis 
+                  dataKey="time" 
+                  tick={{ fontSize: 9 }} 
+                  angle={-45}
+                  textAnchor="end"
+                  height={50}
+                  interval={Math.floor(chartData.length / 8)}
+                />
+                <YAxis 
+                  domain={['auto', 'auto']} 
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'Temperature (°C)', angle: -90, position: 'insideLeft', fontSize: 10 }}
+                />
                 {items.map((item, idx) => (
                   <Line
                     key={idx}
@@ -359,11 +391,12 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
                     strokeWidth={1.5}
                     dot={false}
                     name={sanitizeForPDF(item.logger.name)}
+                    connectNulls
                   />
                 ))}
-                <Legend wrapperStyle={{ fontSize: '10px' }} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                 <Tooltip 
-                  contentStyle={{ fontSize: '10px' }}
+                  contentStyle={{ fontSize: '11px' }}
                   formatter={(value: number) => [`${value.toFixed(1)}°C`]}
                 />
               </LineChart>
@@ -371,7 +404,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           </div>
         );
         
-        setTimeout(resolve, 200);
+        setTimeout(resolve, 300);
       });
 
       // Capture to canvas
@@ -382,7 +415,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         });
         
         const imgData = canvas.toDataURL('image/png');
-        const imgWidth = (pageWidth - margin * 2) * 0.8;
+        const imgWidth = pageWidth - margin * 2;
         const imgHeight = (canvas.height * imgWidth) / canvas.width;
         
         // Check if need new page
@@ -392,7 +425,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           yPos = margin;
         }
         
-        pdf.addImage(imgData, 'PNG', margin + (pageWidth - margin * 2 - imgWidth) / 2, yPos, imgWidth, imgHeight);
+        pdf.addImage(imgData, 'PNG', margin, yPos, imgWidth, imgHeight);
         yPos += imgHeight + 10;
       } catch (error) {
         console.error('Failed to capture filtered chart:', error);
@@ -783,7 +816,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       pdf.setFontSize(12);
       pdf.setFont("helvetica", "bold");
       pdf.setTextColor(59, 130, 246);
-      pdf.text("III. TEMPERATURE PROFILES (Selected Data)", margin, yPos);
+      pdf.text("III. TEMPERATURE PROFILES", margin, yPos);
       yPos += 8;
 
       // Render filtered charts
@@ -815,8 +848,8 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           body: hotwaterResults.map((r) => [
             sanitizeForPDF(r.loggerName),
             sanitizeForPDF(r.sessionName),
-            `>= ${r.threshold?.toFixed(1)}C`,
-            `${r.averageTemp.toFixed(2)}C`,
+            `>= ${r.threshold?.toFixed(1)}\u00B0C`,
+            `${r.averageTemp.toFixed(2)}\u00B0C`,
             `${r.durationMinutes.toFixed(1)} min`,
           ]),
           margin: { left: margin, right: margin },
@@ -843,11 +876,11 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           head: [["Logger", "Session", "Avg Temp", "Duration", "F-Value"]],
           body: productResults.map((r) => {
             const isSterilization = r.sterilizationType === "sterilization";
-            const fValueLabel = isSterilization ? "F121C" : "F63C";
+            const fValueLabel = isSterilization ? "F121\u00B0C" : "F63\u00B0C";
             return [
               sanitizeForPDF(r.loggerName),
               sanitizeForPDF(r.sessionName),
-              `${r.averageTemp.toFixed(2)}C`,
+              `${r.averageTemp.toFixed(2)}\u00B0C`,
               `${r.durationMinutes.toFixed(1)} min`,
               `${fValueLabel}: ${r.sessionFValue?.toFixed(2) || "0.00"}`,
             ];
@@ -896,7 +929,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
             pdf.setFontSize(9);
             pdf.setFont("helvetica", "normal");
             pdf.text(
-              `Avg Temp: ${avgTemp.toFixed(2)}C | Avg Duration: ${avgDuration.toFixed(1)} min | Avg F-Value: ${avgFValue.toFixed(2)}`,
+              `Avg Temp: ${avgTemp.toFixed(2)}\u00B0C | Avg Duration: ${avgDuration.toFixed(1)} min | Avg F-Value: ${avgFValue.toFixed(2)}`,
               margin,
               yPos
             );
@@ -908,7 +941,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
               body: result.itemResults.map((item) => [
                 sanitizeForPDF(item.loggerName),
                 sanitizeForPDF(item.sessionName),
-                `${item.averageTemp.toFixed(2)}C`,
+                `${item.averageTemp.toFixed(2)}\u00B0C`,
                 `${item.durationMinutes.toFixed(1)} min`,
                 item.fValue.toFixed(2),
               ]),
