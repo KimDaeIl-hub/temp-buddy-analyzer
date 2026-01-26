@@ -1,9 +1,12 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
 import { AnalysisGroup } from "@/types/analysis";
 import { DataFile, FileViewMode, ResultFilter as ResultFilterType } from "@/types/file";
+import { SessionHistory } from "@/types/history";
 import { parseCSVContent } from "@/utils/csvParser";
+import { useHistory } from "@/hooks/useHistory";
 import { MultiFileUpload } from "@/components/MultiFileUpload";
+import { HistoryPanel } from "@/components/HistoryPanel";
 import { FileViewToggle } from "@/components/FileViewToggle";
 import { LoggerConfig } from "@/components/LoggerConfig";
 import { SessionManager } from "@/components/SessionManager";
@@ -28,12 +31,15 @@ import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp, FileDown, Calc
 
 const Index = () => {
   const [files, setFiles] = useState<DataFile[]>([]);
+  const [fileContents, setFileContents] = useState<Map<string, string>>(new Map());
   const [analysisGroups, setAnalysisGroups] = useState<AnalysisGroup[]>([]);
   const [activeTab, setActiveTab] = useState("chart");
   const [viewMode, setViewMode] = useState<FileViewMode>({ mode: 'combined' });
   const [resultFilters, setResultFilters] = useState<ResultFilterType[]>([]);
   const [activeFileId, setActiveFileId] = useState<string | null>(null);
   const chartComponentRef = useRef<TemperatureChartRef>(null);
+  
+  const { historyItems, saveHistory, deleteHistory, clearHistory } = useHistory();
 
   // Get combined loggers and sessions based on view mode
   const { displayLoggers, displaySessions, currentFile } = useMemo(() => {
@@ -161,11 +167,76 @@ const Index = () => {
 
   const handleReset = useCallback(() => {
     setFiles([]);
+    setFileContents(new Map());
     setAnalysisGroups([]);
     setResultFilters([]);
     setActiveTab("chart");
     setViewMode({ mode: 'combined' });
     setActiveFileId(null);
+  }, []);
+
+  // Save history when files are modified (sessions, logger configs)
+  useEffect(() => {
+    files.forEach(file => {
+      if (file.sessions.length > 0) {
+        const content = fileContents.get(file.id);
+        if (content) {
+          saveHistory(file, content);
+        }
+      }
+    });
+  }, [files, fileContents, saveHistory]);
+
+  // Handle file upload with content storage
+  const handleFilesChange = useCallback((newFiles: DataFile[], contents?: Map<string, string>) => {
+    setFiles(newFiles);
+    if (contents) {
+      setFileContents(prev => {
+        const updated = new Map(prev);
+        contents.forEach((content, id) => {
+          updated.set(id, content);
+        });
+        return updated;
+      });
+    }
+  }, []);
+
+  // Load history item
+  const handleLoadHistory = useCallback((history: SessionHistory) => {
+    // Parse the file content to recreate loggers
+    const loggers = parseCSVContent(history.fileContent);
+    
+    // Apply saved logger configurations
+    const configuredLoggers = loggers.map(logger => {
+      const savedConfig = history.loggerConfigs.find(c => c.loggerId === logger.id);
+      if (savedConfig) {
+        return {
+          ...logger,
+          type: savedConfig.type,
+          setTemperature: savedConfig.setTemperature,
+          sterilizationType: savedConfig.sterilizationType,
+        };
+      }
+      return logger;
+    });
+
+    const newFile: DataFile = {
+      id: `file-${Date.now()}`,
+      name: history.fileName,
+      loggers: configuredLoggers,
+      sessions: history.sessions.map(s => ({
+        ...s,
+        startTime: new Date(s.startTime),
+        endTime: new Date(s.endTime),
+      })),
+      uploadedAt: new Date(),
+    };
+
+    setFiles([newFile]);
+    setFileContents(new Map([[newFile.id, history.fileContent]]));
+    setViewMode({ mode: 'combined' });
+    setActiveFileId(null);
+    setResultFilters([]);
   }, []);
 
   // Get all loggers and sessions from all files for analysis
@@ -242,7 +313,15 @@ const Index = () => {
               </p>
             </div>
             
-            <MultiFileUpload files={files} onFilesChange={setFiles} />
+            <MultiFileUpload files={files} onFilesChange={handleFilesChange} />
+            
+            {/* History Panel */}
+            <HistoryPanel
+              historyItems={historyItems}
+              onLoadHistory={handleLoadHistory}
+              onDeleteHistory={deleteHistory}
+              onClearHistory={clearHistory}
+            />
             
             <div className="grid gap-4 md:grid-cols-3 mt-8">
               <div className="p-4 rounded-lg border bg-card text-center">
