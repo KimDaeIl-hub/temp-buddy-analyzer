@@ -89,26 +89,53 @@ const Index = () => {
     return files[0] || null;
   }, [files, viewMode, activeFileId]);
 
-  const handleUpdateLogger = useCallback((loggerId: string, updates: Partial<DataLogger>) => {
-    setFiles(prev => prev.map(file => ({
-      ...file,
-      loggers: file.loggers.map(l => {
-        // Handle both prefixed and non-prefixed IDs
-        const matchId = loggerId.includes(file.id) 
-          ? loggerId.replace(`${file.id}-`, '')
-          : loggerId;
-        return l.id === matchId || l.id === loggerId ? { ...l, ...updates } : l;
-      })
-    })));
+  // Update logger with file-specific targeting
+  const handleUpdateLogger = useCallback((loggerId: string, updates: Partial<DataLogger>, targetFileId?: string) => {
+    setFiles(prev => prev.map(file => {
+      // If targetFileId is specified, only update that file
+      if (targetFileId && file.id !== targetFileId) {
+        return file;
+      }
+      
+      return {
+        ...file,
+        loggers: file.loggers.map(l => {
+          // For prefixed IDs (combined mode): extract file ID and logger ID
+          if (loggerId.startsWith(`${file.id}-`)) {
+            const actualLoggerId = loggerId.replace(`${file.id}-`, '');
+            return l.id === actualLoggerId ? { ...l, ...updates } : l;
+          }
+          // For non-prefixed IDs (individual mode): only match if targetFileId matches
+          if (targetFileId === file.id && l.id === loggerId) {
+            return { ...l, ...updates };
+          }
+          // Without targetFileId, don't match non-prefixed IDs to prevent cross-file updates
+          return l;
+        })
+      };
+    }));
   }, []);
 
-  const handleUpdateSession = useCallback((sessionId: number, updates: Partial<MeasurementSession>) => {
-    setFiles(prev => prev.map(file => ({
-      ...file,
-      sessions: file.sessions.map(s => 
-        s.id === sessionId || s.id === sessionId % 1000 ? { ...s, ...updates } : s
-      )
-    })));
+  const handleUpdateSession = useCallback((sessionId: number, updates: Partial<MeasurementSession>, targetFileId?: string) => {
+    setFiles(prev => prev.map(file => {
+      // If targetFileId is specified, only update that file
+      if (targetFileId && file.id !== targetFileId) {
+        return file;
+      }
+      
+      return {
+        ...file,
+        sessions: file.sessions.map(s => {
+          // For offset IDs (combined mode): check if ID matches with file offset
+          const fileIndex = prev.findIndex(f => f.id === file.id);
+          const offsetId = sessionId - fileIndex * 1000;
+          if (s.id === offsetId || s.id === sessionId) {
+            return { ...s, ...updates };
+          }
+          return s;
+        })
+      };
+    }));
   }, []);
 
   const handleSessionsChange = useCallback((sessions: MeasurementSession[], fileId?: string) => {
@@ -301,6 +328,8 @@ const Index = () => {
                     sessions={displaySessions}
                     onUpdateLogger={handleUpdateLogger} 
                     onUpdateSession={handleUpdateSession}
+                    currentFileId={viewMode.mode === 'individual' ? viewMode.selectedFileId : undefined}
+                    viewMode={viewMode.mode}
                   />
                 </TabsContent>
 
