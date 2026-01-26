@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DataLogger, MeasurementSession } from "@/types/temperature";
-import { calculateSessionResults } from "@/utils/calculations";
+import { AnalysisGroup, AnalysisGroupResult } from "@/types/analysis";
+import { calculateSessionResults, getRecordsInSession, calculateProductResults, calculateHotWaterResults } from "@/utils/calculations";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,6 +25,7 @@ interface PDFReportGeneratorProps {
   loggers: DataLogger[];
   sessions: MeasurementSession[];
   chartRef: React.RefObject<HTMLDivElement>;
+  analysisGroups?: AnalysisGroup[];
 }
 
 interface ReportSettings {
@@ -33,7 +35,104 @@ interface ReportSettings {
   validationNotes: string;
 }
 
-export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGeneratorProps) {
+// Korean text mapping for PDF (using ASCII-safe alternatives)
+const koreanToEnglish: Record<string, string> = {
+  "열수": "Hot Water",
+  "품온": "Product Temp",
+  "회차": "Session",
+  "평균 온도": "Avg Temp",
+  "유지 시간": "Duration",
+  "분": "min",
+  "살균": "Pasteurization",
+  "멸균": "Sterilization",
+  "총": "Total",
+  "레코드": "Records",
+  "로거": "Logger",
+  "분석 그룹": "Analysis Group",
+};
+
+// Calculate analysis group result
+function calculateGroupResult(
+  group: AnalysisGroup,
+  loggers: DataLogger[],
+  sessions: MeasurementSession[]
+): AnalysisGroupResult | null {
+  if (group.items.length === 0) return null;
+
+  const itemResults: AnalysisGroupResult['itemResults'] = [];
+  let totalRecords = 0;
+  let tempSum = 0;
+  let tempCount = 0;
+  let minTemp = Infinity;
+  let maxTemp = -Infinity;
+  let totalDurationMinutes = 0;
+  let totalFValue = 0;
+
+  group.items.forEach(item => {
+    const logger = loggers.find(l => l.id === item.loggerId);
+    const session = sessions.find(s => s.id === item.sessionId);
+    
+    if (!logger || !session) return;
+
+    const sessionRecords = getRecordsInSession(logger.records, session);
+    if (sessionRecords.length === 0) return;
+
+    let avgTemp = 0;
+    let duration = 0;
+    let fValue = 0;
+
+    if (logger.type === 'hotwater') {
+      const setTemp = session.setTemperature || logger.setTemperature || 0;
+      const result = calculateHotWaterResults(sessionRecords, setTemp);
+      avgTemp = result.averageTemp;
+      duration = result.durationMinutes;
+    } else if (logger.type === 'product') {
+      const sterilType = logger.sterilizationType || 'pasteurization';
+      const result = calculateProductResults(sessionRecords, sterilType);
+      avgTemp = result.averageTemp;
+      duration = result.durationMinutes;
+      fValue = result.sessionFValue;
+    }
+
+    sessionRecords.forEach(r => {
+      tempSum += r.temperature;
+      tempCount++;
+      minTemp = Math.min(minTemp, r.temperature);
+      maxTemp = Math.max(maxTemp, r.temperature);
+    });
+    totalRecords += sessionRecords.length;
+    totalDurationMinutes += duration;
+    totalFValue += fValue;
+
+    itemResults.push({
+      loggerId: item.loggerId,
+      loggerName: item.loggerName,
+      sessionId: item.sessionId,
+      sessionName: item.sessionName,
+      averageTemp: avgTemp,
+      durationMinutes: duration,
+      fValue,
+      recordCount: sessionRecords.length,
+    });
+  });
+
+  if (tempCount === 0) return null;
+
+  return {
+    groupId: group.id,
+    groupName: group.name,
+    items: group.items,
+    totalRecords,
+    averageTemp: tempSum / tempCount,
+    minTemp: minTemp === Infinity ? 0 : minTemp,
+    maxTemp: maxTemp === -Infinity ? 0 : maxTemp,
+    totalDurationMinutes,
+    totalFValue,
+    itemResults,
+  };
+}
+
+export function PDFReportGenerator({ loggers, sessions, chartRef, analysisGroups = [] }: PDFReportGeneratorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [settings, setSettings] = useState<ReportSettings>({
@@ -45,7 +144,7 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
 
   const generatePDF = async () => {
     if (sessions.length === 0) {
-      alert("회차를 먼저 분할해주세요.");
+      alert("Please split sessions first. (회차를 먼저 분할해주세요.)");
       return;
     }
 
@@ -79,7 +178,7 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
       
       pdf.setFontSize(10);
       pdf.setFont("helvetica", "normal");
-      const today = new Date().toLocaleDateString("ko-KR", {
+      const today = new Date().toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
         day: "numeric",
@@ -217,8 +316,8 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
           body: hotwaterResults.map((r) => [
             r.loggerName,
             r.sessionName,
-            `≥ ${r.threshold?.toFixed(1)}°C`,
-            `${r.averageTemp.toFixed(2)}°C`,
+            `>= ${r.threshold?.toFixed(1)}C`,
+            `${r.averageTemp.toFixed(2)}C`,
             `${r.durationMinutes.toFixed(1)} min`,
             r.recordCount.toString(),
           ]),
@@ -243,14 +342,14 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
 
         autoTable(pdf, {
           startY: yPos,
-          head: [["Logger", "Session", "Avg Temp (≥63°C)", "Duration", "F-Value"]],
+          head: [["Logger", "Session", "Avg Temp (>=63C)", "Duration", "F-Value"]],
           body: productResults.map((r) => {
             const isSterilization = r.sterilizationType === "sterilization";
-            const fValueLabel = isSterilization ? "F121°C" : "F63°C";
+            const fValueLabel = isSterilization ? "F121C" : "F63C";
             return [
               r.loggerName,
               r.sessionName,
-              `${r.averageTemp.toFixed(2)}°C`,
+              `${r.averageTemp.toFixed(2)}C`,
               `${r.durationMinutes.toFixed(1)} min`,
               `${fValueLabel}: ${r.sessionFValue?.toFixed(2) || "0.00"}`,
             ];
@@ -264,13 +363,75 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
         yPos = (pdf as any).lastAutoTable.finalY + 10;
       }
 
+      // Analysis Groups Section (NEW)
+      if (analysisGroups.length > 0) {
+        const groupsWithResults = analysisGroups
+          .map(group => ({
+            group,
+            result: calculateGroupResult(group, loggers, sessions)
+          }))
+          .filter(({ result }) => result !== null);
+
+        if (groupsWithResults.length > 0) {
+          checkNewPage(40);
+          pdf.setFontSize(12);
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(59, 130, 246);
+          pdf.text("V. CUSTOM ANALYSIS GROUPS", margin, yPos);
+          yPos += 8;
+
+          groupsWithResults.forEach(({ group, result }) => {
+            if (!result) return;
+
+            checkNewPage(50);
+            
+            // Group title
+            pdf.setFontSize(10);
+            pdf.setFont("helvetica", "bold");
+            pdf.setTextColor(0, 0, 0);
+            pdf.text(`Group: ${group.name}`, margin, yPos);
+            yPos += 5;
+
+            // Group summary
+            pdf.setFontSize(9);
+            pdf.setFont("helvetica", "normal");
+            pdf.text(
+              `Avg Temp: ${result.averageTemp.toFixed(2)}C | Duration: ${result.totalDurationMinutes.toFixed(1)} min | F-Value: ${result.totalFValue.toFixed(2)} | Records: ${result.totalRecords}`,
+              margin,
+              yPos
+            );
+            yPos += 5;
+
+            // Item details table
+            autoTable(pdf, {
+              startY: yPos,
+              head: [["Logger", "Session", "Avg Temp", "Duration", "F-Value"]],
+              body: result.itemResults.map((item) => [
+                item.loggerName,
+                item.sessionName,
+                `${item.averageTemp.toFixed(2)}C`,
+                `${item.durationMinutes.toFixed(1)} min`,
+                item.fValue.toFixed(2),
+              ]),
+              margin: { left: margin, right: margin },
+              styles: { fontSize: 7, cellPadding: 2 },
+              headStyles: { fillColor: [124, 58, 237], textColor: 255 },
+              alternateRowStyles: { fillColor: [248, 250, 252] },
+            });
+
+            yPos = (pdf as any).lastAutoTable.finalY + 10;
+          });
+        }
+      }
+
       // Validation Notes
       if (settings.validationNotes) {
         checkNewPage(40);
         pdf.setFontSize(12);
         pdf.setFont("helvetica", "bold");
         pdf.setTextColor(59, 130, 246);
-        pdf.text("V. VERIFICATION NOTES", margin, yPos);
+        const sectionNum = analysisGroups.length > 0 ? "VI" : "V";
+        pdf.text(`${sectionNum}. VERIFICATION NOTES`, margin, yPos);
         yPos += 8;
 
         pdf.setFontSize(9);
@@ -304,30 +465,31 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
       setIsOpen(false);
     } catch (error) {
       console.error("PDF generation failed:", error);
-      alert("PDF 생성에 실패했습니다.");
+      alert("PDF generation failed. Please try again.");
     } finally {
       setIsGenerating(false);
     }
   };
 
   const isReady = loggers.length > 0 && sessions.length > 0;
+  const hasAnalysisGroups = analysisGroups.length > 0;
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button className="gap-2" disabled={!isReady}>
           <FileDown className="w-4 h-4" />
-          PDF 리포트
+          PDF Report
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <FileText className="w-5 h-5 text-primary" />
-            PDF 리포트 생성
+            Generate PDF Report
           </DialogTitle>
           <DialogDescription>
-            분석 결과를 PDF 리포트로 내보냅니다
+            Export analysis results as a PDF report
           </DialogDescription>
         </DialogHeader>
 
@@ -337,15 +499,15 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
                 <Settings2 className="w-4 h-4" />
-                리포트 설정
+                Report Settings
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="productName">제품명</Label>
+                <Label htmlFor="productName">Product Name</Label>
                 <Input
                   id="productName"
-                  placeholder="예: 김치찌개 Batch A"
+                  placeholder="e.g., Batch A"
                   value={settings.productName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, productName: e.target.value }))
@@ -353,10 +515,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="operatorName">작업자</Label>
+                <Label htmlFor="operatorName">Operator</Label>
                 <Input
                   id="operatorName"
-                  placeholder="예: 홍길동"
+                  placeholder="e.g., John Doe"
                   value={settings.operatorName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, operatorName: e.target.value }))
@@ -364,10 +526,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="facilityName">시설명</Label>
+                <Label htmlFor="facilityName">Facility</Label>
                 <Input
                   id="facilityName"
-                  placeholder="예: 가공 공장 A동"
+                  placeholder="e.g., Processing Plant A"
                   value={settings.facilityName}
                   onChange={(e) =>
                     setSettings((prev) => ({ ...prev, facilityName: e.target.value }))
@@ -375,10 +537,10 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="notes">검증 메모</Label>
+                <Label htmlFor="notes">Verification Notes</Label>
                 <Textarea
                   id="notes"
-                  placeholder="추가 메모 사항..."
+                  placeholder="Additional notes..."
                   rows={3}
                   value={settings.validationNotes}
                   onChange={(e) =>
@@ -393,8 +555,8 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-sm">
-                <CheckCircle2 className="w-4 h-4 text-green-500" />
-                리포트 미리보기
+                <CheckCircle2 className="w-4 h-4 text-primary" />
+                Report Preview
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -402,7 +564,7 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
                 <div className="flex items-center justify-between mb-3">
                   <div className="text-xs text-muted-foreground">ISSUE DATE</div>
                   <div className="text-sm font-medium">
-                    {new Date().toLocaleDateString("ko-KR")}
+                    {new Date().toLocaleDateString("en-US")}
                   </div>
                 </div>
                 <div className="text-lg font-bold text-primary mb-2">
@@ -417,26 +579,29 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
 
               <div className="space-y-2">
                 <div className="text-xs font-medium text-muted-foreground">
-                  포함 내용
+                  Included Content
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">온도 그래프</Badge>
-                  <Badge variant="secondary">회차별 결과</Badge>
-                  <Badge variant="secondary">열수 분석</Badge>
-                  <Badge variant="secondary">품온 분석</Badge>
+                  <Badge variant="secondary">Temperature Chart</Badge>
+                  <Badge variant="secondary">Session Results</Badge>
+                  <Badge variant="secondary">Hot Water Analysis</Badge>
+                  <Badge variant="secondary">Product Analysis</Badge>
+                  {hasAnalysisGroups && (
+                    <Badge variant="secondary">Analysis Groups ({analysisGroups.length})</Badge>
+                  )}
                   {settings.validationNotes && (
-                    <Badge variant="secondary">검증 메모</Badge>
+                    <Badge variant="secondary">Notes</Badge>
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-center">
                 <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">로거</div>
+                  <div className="text-xs text-muted-foreground">Loggers</div>
                   <div className="text-xl font-bold text-primary">{loggers.length}</div>
                 </div>
                 <div className="p-3 rounded-lg bg-primary/10">
-                  <div className="text-xs text-muted-foreground">회차</div>
+                  <div className="text-xs text-muted-foreground">Sessions</div>
                   <div className="text-xl font-bold text-primary">{sessions.length}</div>
                 </div>
               </div>
@@ -446,18 +611,18 @@ export function PDFReportGenerator({ loggers, sessions, chartRef }: PDFReportGen
 
         <div className="flex justify-end gap-3 pt-4 border-t">
           <Button variant="outline" onClick={() => setIsOpen(false)}>
-            취소
+            Cancel
           </Button>
           <Button onClick={generatePDF} disabled={isGenerating || !isReady}>
             {isGenerating ? (
               <>
                 <span className="animate-spin mr-2">⏳</span>
-                생성 중...
+                Generating...
               </>
             ) : (
               <>
                 <FileDown className="w-4 h-4 mr-2" />
-                PDF 다운로드
+                Download PDF
               </>
             )}
           </Button>
