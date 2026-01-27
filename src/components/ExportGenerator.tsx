@@ -248,12 +248,15 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
   }, [files, resultFilters]);
 
   // Get filtered chart data for specific logger and session
+  // IMPORTANT: Returns ALL records for each logger, not just those within session bounds
+  // This ensures the chart can render the full line from session start to end
   const getFilteredChartData = useCallback(() => {
     const filteredData: { 
       logger: DataLogger; 
       session: MeasurementSession; 
       file: DataFile;
       records: any[];
+      sessionRecords: any[]; // Records strictly within session bounds
     }[] = [];
 
     files.forEach(file => {
@@ -269,13 +272,21 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           );
           
           if (isEnabled) {
-            const records = getRecordsInSession(logger.records, session);
-            if (records.length > 0) {
+            const sessionRecords = getRecordsInSession(logger.records, session);
+            if (sessionRecords.length > 0) {
+              // Get ALL records from logger that could span the session time range
+              // This includes records slightly before/after for continuity
+              const allRecords = logger.records.filter(r => 
+                r.timestamp.getTime() >= session.startTime.getTime() - 60000 && // 1 min buffer
+                r.timestamp.getTime() <= session.endTime.getTime() + 60000
+              );
+              
               filteredData.push({
                 logger,
                 session,
                 file,
-                records
+                records: allRecords.length > 0 ? allRecords : sessionRecords,
+                sessionRecords
               });
             }
           }
@@ -371,58 +382,80 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       });
 
       // Fill series using a forward-fill strategy so lines never "end early".
-      // This matches the UI expectation: if a logger has values through the session,
-      // its line should render up to sessionEnd.
+      // For each logger, at each time point, find the most recent record value.
       items.forEach((item, idx) => {
         const records = item.records;
         if (!records || records.length === 0) return;
 
+        // Sort records by timestamp
         const sorted = [...records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
         
-        // Pre-compute last known values for the entire dataset
-        const lastKnownTemp = sorted[sorted.length - 1].temperature;
-        const lastKnownF = sorted.reduce((acc, r) => {
-          if (r.fValue !== undefined && r.fValue !== null) return r.fValue;
-          return acc;
-        }, undefined as number | undefined);
-        
-        let p = 0;
-        let currentTemp: number | undefined;
-        let currentF: number | undefined;
+        // Get first and last record times
         const firstRecordTime = sorted[0].timestamp.getTime();
         const lastRecordTime = sorted[sorted.length - 1].timestamp.getTime();
-
-        sampledTimestamps.forEach((t) => {
-          // Advance pointer to find the most recent record at or before time t
-          while (p < sorted.length && sorted[p].timestamp.getTime() <= t) {
-            currentTemp = sorted[p].temperature;
-            if (sorted[p].fValue !== undefined && sorted[p].fValue !== null) {
-              currentF = sorted[p].fValue;
-            }
-            p++;
+        const lastTemp = sorted[sorted.length - 1].temperature;
+        
+        // Find last F value
+        let lastFValue: number | undefined;
+        for (let i = sorted.length - 1; i >= 0; i--) {
+          if (sorted[i].fValue !== undefined && sorted[i].fValue !== null) {
+            lastFValue = sorted[i].fValue;
+            break;
           }
+        }
 
+        // Binary search helper to find the index of the last record at or before time t
+        const findLastRecordBeforeTime = (t: number): number => {
+          let left = 0;
+          let right = sorted.length - 1;
+          let result = -1;
+          
+          while (left <= right) {
+            const mid = Math.floor((left + right) / 2);
+            if (sorted[mid].timestamp.getTime() <= t) {
+              result = mid;
+              left = mid + 1;
+            } else {
+              right = mid - 1;
+            }
+          }
+          return result;
+        };
+
+        // Fill each time point
+        sampledTimestamps.forEach((t) => {
           const point = dataMap.get(t);
           if (!point) return;
 
-          // Only start drawing after first record time
-          if (t >= firstRecordTime) {
-            // If we're past the last actual record, use the last known values
-            if (t > lastRecordTime) {
-              point[`temp${idx}`] = lastKnownTemp;
-              if (lastKnownF !== undefined) point[`fvalue${idx}`] = lastKnownF;
-            } else if (currentTemp !== undefined) {
-              point[`temp${idx}`] = currentTemp;
-              if (currentF !== undefined) point[`fvalue${idx}`] = currentF;
+          // Don't draw before first record
+          if (t < firstRecordTime) return;
+
+          // If we're past or at the last record, use the last known values
+          if (t >= lastRecordTime) {
+            point[`temp${idx}`] = lastTemp;
+            if (lastFValue !== undefined) point[`fvalue${idx}`] = lastFValue;
+          } else {
+            // Find the most recent record at or before time t
+            const recordIdx = findLastRecordBeforeTime(t);
+            if (recordIdx >= 0) {
+              point[`temp${idx}`] = sorted[recordIdx].temperature;
+              
+              // Find F value from this or earlier record
+              for (let i = recordIdx; i >= 0; i--) {
+                if (sorted[i].fValue !== undefined && sorted[i].fValue !== null) {
+                  point[`fvalue${idx}`] = sorted[i].fValue;
+                  break;
+                }
+              }
             }
           }
         });
 
-        // Explicitly ensure session end point has data
+        // Explicitly ensure session end point has data (force the line to extend to session end)
         const endPoint = dataMap.get(sessionEnd);
         if (endPoint) {
-          endPoint[`temp${idx}`] = lastKnownTemp;
-          if (lastKnownF !== undefined) endPoint[`fvalue${idx}`] = lastKnownF;
+          endPoint[`temp${idx}`] = lastTemp;
+          if (lastFValue !== undefined) endPoint[`fvalue${idx}`] = lastFValue;
         }
       });
 

@@ -49,13 +49,25 @@ export function useHistory() {
       return;
     }
 
-    const loggerConfigs: LoggerHistoryConfig[] = file.loggers.map(logger => ({
-      loggerId: logger.id,
-      loggerName: logger.name,
-      type: logger.type,
-      setTemperature: logger.setTemperature,
-      sterilizationType: logger.sterilizationType,
-    }));
+    // Build logger configs with per-session temperatures
+    const loggerConfigs: LoggerHistoryConfig[] = file.loggers.map(logger => {
+      // Extract session temperatures for this logger from all sessions
+      const sessionTemperatures: Record<number, number> = {};
+      file.sessions.forEach(session => {
+        if (session.loggerSetTemperatures && session.loggerSetTemperatures[logger.id] !== undefined) {
+          sessionTemperatures[session.id] = session.loggerSetTemperatures[logger.id];
+        }
+      });
+
+      return {
+        loggerId: logger.id,
+        loggerName: logger.name,
+        type: logger.type,
+        setTemperature: logger.setTemperature,
+        sterilizationType: logger.sterilizationType,
+        sessionTemperatures: Object.keys(sessionTemperatures).length > 0 ? sessionTemperatures : undefined,
+      };
+    });
 
     const historyItem: SessionHistory = {
       id: `${file.name}-${Date.now()}`,

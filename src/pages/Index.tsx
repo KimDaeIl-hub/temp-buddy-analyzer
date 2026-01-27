@@ -220,15 +220,32 @@ const Index = () => {
       return logger;
     });
 
+    // Rebuild sessions with loggerSetTemperatures from saved configs
+    const restoredSessions = history.sessions.map(s => {
+      const loggerSetTemperatures: Record<string, number> = {};
+      
+      // Restore loggerSetTemperatures from each logger's sessionTemperatures
+      history.loggerConfigs.forEach(config => {
+        if (config.sessionTemperatures && config.sessionTemperatures[s.id] !== undefined) {
+          loggerSetTemperatures[config.loggerId] = config.sessionTemperatures[s.id];
+        }
+      });
+
+      return {
+        ...s,
+        startTime: new Date(s.startTime),
+        endTime: new Date(s.endTime),
+        loggerSetTemperatures: Object.keys(loggerSetTemperatures).length > 0 
+          ? loggerSetTemperatures 
+          : s.loggerSetTemperatures, // fallback to saved session data
+      };
+    });
+
     const newFile: DataFile = {
       id: `file-${Date.now()}`,
       name: history.fileName,
       loggers: configuredLoggers,
-      sessions: history.sessions.map(s => ({
-        ...s,
-        startTime: new Date(s.startTime),
-        endTime: new Date(s.endTime),
-      })),
+      sessions: restoredSessions,
       uploadedAt: new Date(),
     };
 

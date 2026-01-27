@@ -15,4 +15,6 @@ export interface LoggerHistoryConfig {
   type: 'hotwater' | 'product' | null;
   setTemperature?: number;
   sterilizationType?: 'pasteurization' | 'sterilization';
+  // Per-session temperature settings for this logger
+  sessionTemperatures?: Record<number, number>; // sessionId -> temperature
 }
