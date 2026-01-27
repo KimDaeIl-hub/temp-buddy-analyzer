@@ -340,18 +340,25 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       const sessionStart = session.startTime.getTime();
       const sessionEnd = session.endTime.getTime();
 
-      // Create uniform timeline from session start to end
-      // This ensures we always have points covering the entire session
-      const numPoints = 200;
-      const timeStep = (sessionEnd - sessionStart) / (numPoints - 1);
-      const uniformTimeline: number[] = [];
-      for (let i = 0; i < numPoints; i++) {
-        uniformTimeline.push(sessionStart + i * timeStep);
-      }
-      // Always include exact session end
-      if (uniformTimeline[uniformTimeline.length - 1] !== sessionEnd) {
-        uniformTimeline.push(sessionEnd);
-      }
+       // Create uniform timeline from session start to end.
+       // IMPORTANT: Use integer millisecond timestamps to avoid floating-point drift
+       // that can cause intermittent "missing" points (undefined) and broken lines.
+       const numPoints = 200;
+       const timeStep = (sessionEnd - sessionStart) / (numPoints - 1);
+       const uniformTimeline: number[] = [];
+       let lastTs = sessionStart;
+       for (let i = 0; i < numPoints; i++) {
+         let t = Math.round(sessionStart + i * timeStep);
+         if (i > 0 && t <= lastTs) t = lastTs + 1; // ensure strictly increasing
+         uniformTimeline.push(t);
+         lastTs = t;
+       }
+       // Always include exact session end (and keep timeline monotonic)
+       if (uniformTimeline[uniformTimeline.length - 1] < sessionEnd) {
+         uniformTimeline.push(sessionEnd);
+       } else {
+         uniformTimeline[uniformTimeline.length - 1] = sessionEnd;
+       }
 
       // Create chart points with uniform timeline
       const chartData: any[] = uniformTimeline.map(t => ({

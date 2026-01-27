@@ -465,7 +465,13 @@ const Index = () => {
                     sessions={displaySessions}
                     onUpdateLogger={handleUpdateLogger} 
                     onUpdateSession={handleUpdateSession}
-                    currentFileId={viewMode.mode === 'individual' ? viewMode.selectedFileId : undefined}
+                    // In combined mode, LoggerConfig may emit non-prefixed logger IDs (single-file scenario).
+                    // We must provide a target file id so updates (type / sterilization) apply correctly.
+                    currentFileId={
+                      viewMode.mode === 'individual'
+                        ? viewMode.selectedFileId
+                        : (editableFile?.id || files[0]?.id)
+                    }
                     viewMode={viewMode.mode}
                   />
                 </TabsContent>
