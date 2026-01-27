@@ -328,59 +328,92 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       // Use session's defined time range to ensure FULL session is shown on X-axis
       const sessionStart = session.startTime.getTime();
       const sessionEnd = session.endTime.getTime();
-      const sessionDuration = sessionEnd - sessionStart;
+      const sessionDuration = Math.max(0, sessionEnd - sessionStart);
 
-      // Target ~180 points across the full session duration
-      const targetPoints = 180;
-      const timeStep = Math.max(1000, Math.floor(sessionDuration / targetPoints));
+      // Build a merged timeline from *all* logger records + (start/end).
+      // Then downsample while ALWAYS keeping start/end and each logger's last point.
+      const allTimestamps: number[] = [];
+      items.forEach((item) => {
+        item.records.forEach((r) => allTimestamps.push(r.timestamp.getTime()));
+      });
+      allTimestamps.push(sessionStart, sessionEnd);
+      const uniqueSorted = Array.from(new Set(allTimestamps))
+        .filter((t) => t >= sessionStart && t <= sessionEnd)
+        .sort((a, b) => a - b);
 
-      // Create time slots spanning the ENTIRE session
+      // If extremely dense, sample to target points but preserve critical timestamps.
+      const targetPoints = 220; // slightly higher to keep end segments accurate
+      const preserve = new Set<number>([sessionStart, sessionEnd]);
+      items.forEach((item) => {
+        if (item.records.length > 0) {
+          const sorted = [...item.records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+          preserve.add(sorted[0].timestamp.getTime());
+          preserve.add(sorted[sorted.length - 1].timestamp.getTime());
+        }
+      });
+
+      let sampledTimestamps = uniqueSorted;
+      if (uniqueSorted.length > targetPoints) {
+        const step = Math.ceil(uniqueSorted.length / targetPoints);
+        sampledTimestamps = uniqueSorted.filter((t, idx) => idx % step === 0 || preserve.has(t));
+        // Ensure preserve timestamps included
+        preserve.forEach((t) => sampledTimestamps.push(t));
+        sampledTimestamps = Array.from(new Set(sampledTimestamps)).sort((a, b) => a - b);
+      }
+
+      // Create chart points
       const dataMap = new Map<number, any>();
-      for (let t = sessionStart; t <= sessionEnd; t += timeStep) {
-        dataMap.set(t, { time: formatTimeForChart(new Date(t)) });
-      }
-      // Always include the exact session end time
-      if (!dataMap.has(sessionEnd)) {
-        dataMap.set(sessionEnd, { time: formatTimeForChart(new Date(sessionEnd)) });
-      }
+      sampledTimestamps.forEach((t) => {
+        dataMap.set(t, {
+          time: formatTimeForChart(new Date(t)),
+          ts: t,
+        });
+      });
 
-      // Fill temperature values from each logger using binary search for closest match
+      // Fill series using a forward-fill strategy so lines never "end early".
+      // This matches the UI expectation: if a logger has values through the session,
+      // its line should render up to sessionEnd.
       items.forEach((item, idx) => {
         const records = item.records;
         if (!records || records.length === 0) return;
 
         const sorted = [...records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        let p = 0;
+        let lastTemp: number | undefined;
+        let lastF: number | undefined;
 
-        dataMap.forEach((point, timestamp) => {
-          // Binary search to find closest record
-          let lo = 0, hi = sorted.length - 1;
-          while (lo < hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            if (sorted[mid].timestamp.getTime() < timestamp) lo = mid + 1;
-            else hi = mid;
+        sampledTimestamps.forEach((t) => {
+          while (p < sorted.length && sorted[p].timestamp.getTime() <= t) {
+            lastTemp = sorted[p].temperature;
+            if (sorted[p].fValue !== undefined && sorted[p].fValue !== null) {
+              lastF = sorted[p].fValue;
+            }
+            p++;
           }
-          // Check both lo and lo-1 for closest
-          let best = lo;
-          if (lo > 0) {
-            const d1 = Math.abs(sorted[lo].timestamp.getTime() - timestamp);
-            const d2 = Math.abs(sorted[lo - 1].timestamp.getTime() - timestamp);
-            if (d2 < d1) best = lo - 1;
-          }
-          const rec = sorted[best];
-          const diff = Math.abs(rec.timestamp.getTime() - timestamp);
-          // Only use if within 3x time step
-          if (diff < timeStep * 3) {
-            point[`temp${idx}`] = rec.temperature;
-            if (rec.fValue !== undefined && rec.fValue !== null) {
-              point[`fvalue${idx}`] = rec.fValue;
+
+          // Only start drawing after first record time, but once started keep it to the end.
+          if (lastTemp !== undefined) {
+            const point = dataMap.get(t);
+            if (point) {
+              point[`temp${idx}`] = lastTemp;
+              if (lastF !== undefined) point[`fvalue${idx}`] = lastF;
             }
           }
         });
+
+        // Force last known values exactly at session end (prevents truncation)
+        if (lastTemp !== undefined) {
+          const endPoint = dataMap.get(sessionEnd);
+          if (endPoint) {
+            endPoint[`temp${idx}`] = lastTemp;
+            if (lastF !== undefined) endPoint[`fvalue${idx}`] = lastF;
+          }
+        }
       });
 
-      const chartData: any[] = Array.from(dataMap.entries())
-        .sort((a, b) => a[0] - b[0])
-        .map(([_, point], index) => ({ index, ...point }));
+      const chartData: any[] = Array.from(dataMap.values()).sort((a, b) => a.ts - b.ts);
+
+      const hasAnyFValue = items.some((it) => it.records.some((r) => r.fValue !== undefined && r.fValue !== null));
 
       // Calculate Y-axis domain based on actual data
       let minTemp = Infinity;
@@ -394,6 +427,23 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       const yPadding = (maxTemp - minTemp) * 0.1;
       const yMin = Math.floor(minTemp - yPadding);
       const yMax = Math.ceil(maxTemp + yPadding);
+
+      // F-value axis domain (optional)
+      let minF = Infinity;
+      let maxF = -Infinity;
+      if (hasAnyFValue) {
+        items.forEach((item) => {
+          item.records.forEach((r) => {
+            if (r.fValue === undefined || r.fValue === null) return;
+            minF = Math.min(minF, r.fValue);
+            maxF = Math.max(maxF, r.fValue);
+          });
+        });
+        if (minF === Infinity || maxF === -Infinity) {
+          minF = 0;
+          maxF = 1;
+        }
+      }
 
       // Render chart using React
       const { createRoot } = await import('react-dom/client');
@@ -417,15 +467,26 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
                   interval={Math.max(0, Math.floor(chartData.length / 10) - 1)}
                 />
                 <YAxis 
+                  yAxisId="temp"
                   domain={[yMin, yMax]} 
                   tick={{ fontSize: 10 }}
                   label={{ value: 'Temperature (\u00B0C)', angle: -90, position: 'insideLeft', fontSize: 10 }}
                 />
+                {hasAnyFValue && (
+                  <YAxis
+                    yAxisId="f"
+                    orientation="right"
+                    tick={{ fontSize: 10 }}
+                    domain={[minF, maxF]}
+                    label={{ value: 'F value', angle: -90, position: 'insideRight', fontSize: 10 }}
+                  />
+                )}
                 {items.map((item, idx) => (
                   <Line
                     key={idx}
                     type="monotone"
                     dataKey={`temp${idx}`}
+                    yAxisId="temp"
                     stroke={CHART_COLORS[idx % CHART_COLORS.length]}
                     strokeWidth={1.5}
                     dot={false}
@@ -433,10 +494,29 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
                     connectNulls
                   />
                 ))}
+                {hasAnyFValue && items.map((item, idx) => (
+                  <Line
+                    key={`f-${idx}`}
+                    type="monotone"
+                    dataKey={`fvalue${idx}`}
+                    yAxisId="f"
+                    stroke={CHART_COLORS[idx % CHART_COLORS.length]}
+                    strokeWidth={1.25}
+                    strokeDasharray="4 3"
+                    dot={false}
+                    name={`${sanitizeForPDF(item.logger.name)} (F)`}
+                    connectNulls
+                    opacity={0.85}
+                  />
+                ))}
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                 <Tooltip 
                   contentStyle={{ fontSize: '11px' }}
-                  formatter={(value: number) => [`${value.toFixed(1)}\u00B0C`]}
+                  formatter={(value: any, name: any) => {
+                    if (typeof value !== 'number') return [value, String(name)];
+                    const isF = String(name).includes('(F)');
+                    return [isF ? value.toFixed(3) : `${value.toFixed(1)}\u00B0C`, String(name)];
+                  }}
                 />
               </LineChart>
             </ResponsiveContainer>
