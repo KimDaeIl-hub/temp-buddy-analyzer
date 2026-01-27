@@ -325,55 +325,80 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       chartContainer.style.backgroundColor = 'white';
       document.body.appendChild(chartContainer);
 
-      // Prepare chart data - use ALL records for accurate visualization
+      // Prepare chart data - use ALL records for full session visualization
       const chartData: any[] = [];
-      const maxLength = Math.max(...items.map(item => item.records.length));
       
-      // Calculate proper sample rate to show full session while keeping chart readable
-      // Aim for 100-150 data points for optimal visualization
-      const targetPoints = 120;
-      const sampleRate = Math.max(1, Math.ceil(maxLength / targetPoints));
+      // Find the full time range across all loggers in this session
+      let allRecords: { record: any; loggerIdx: number }[] = [];
+      items.forEach((item, idx) => {
+        item.records.forEach(record => {
+          allRecords.push({ record, loggerIdx: idx });
+        });
+      });
       
-      for (let i = 0; i < maxLength; i += sampleRate) {
-        const dataPoint: any = { index: i };
+      // Sort by timestamp
+      allRecords.sort((a, b) => a.record.timestamp.getTime() - b.record.timestamp.getTime());
+      
+      // Calculate sample rate - aim for ~150 data points for optimal visualization
+      const totalRecords = allRecords.length;
+      const targetPoints = 150;
+      const sampleRate = Math.max(1, Math.ceil(totalRecords / targetPoints));
+      
+      // Create time-based chart data by sampling the sorted records
+      const sampledRecords: typeof allRecords = [];
+      for (let i = 0; i < totalRecords; i += sampleRate) {
+        sampledRecords.push(allRecords[i]);
+      }
+      // Always include last record
+      if (totalRecords > 0 && (totalRecords - 1) % sampleRate !== 0) {
+        sampledRecords.push(allRecords[totalRecords - 1]);
+      }
+      
+      // Group sampled records by time window and create data points
+      const timeWindowMs = 1000; // 1 second window
+      let currentWindow: { record: any; loggerIdx: number }[] = [];
+      let currentWindowStart = sampledRecords[0]?.record.timestamp.getTime() || 0;
+      
+      const createDataPoint = (records: typeof currentWindow): any => {
+        if (records.length === 0) return null;
+        const dataPoint: any = { index: chartData.length };
         
-        // Use actual timestamp from first item with data at this index
-        let timestamp: Date | null = null;
+        // Use timestamp from first record
+        const timestamp = records[0].record.timestamp;
+        dataPoint.time = formatTimeForChart(timestamp);
+        
+        // Get temperature values for each logger
         items.forEach((item, idx) => {
-          if (item.records[i]) {
-            dataPoint[`temp${idx}`] = item.records[i].temperature;
-            if (item.records[i].fValue !== undefined) {
-              dataPoint[`fvalue${idx}`] = item.records[i].fValue;
-            }
-            if (!timestamp && item.records[i].timestamp) {
-              timestamp = item.records[i].timestamp;
+          const matchingRecord = records.find(r => r.loggerIdx === idx);
+          if (matchingRecord) {
+            dataPoint[`temp${idx}`] = matchingRecord.record.temperature;
+            if (matchingRecord.record.fValue !== undefined) {
+              dataPoint[`fvalue${idx}`] = matchingRecord.record.fValue;
             }
           }
         });
         
-        dataPoint.time = timestamp ? formatTimeForChart(timestamp) : `${i}`;
-        chartData.push(dataPoint);
-      }
+        return dataPoint;
+      };
       
-      // Always include the last data point
-      if (maxLength > 0 && (maxLength - 1) % sampleRate !== 0) {
-        const lastDataPoint: any = { index: maxLength - 1 };
-        let lastTimestamp: Date | null = null;
-        items.forEach((item, idx) => {
-          const lastIdx = item.records.length - 1;
-          if (item.records[lastIdx]) {
-            lastDataPoint[`temp${idx}`] = item.records[lastIdx].temperature;
-            if (item.records[lastIdx].fValue !== undefined) {
-              lastDataPoint[`fvalue${idx}`] = item.records[lastIdx].fValue;
-            }
-            if (!lastTimestamp && item.records[lastIdx].timestamp) {
-              lastTimestamp = item.records[lastIdx].timestamp;
-            }
-          }
-        });
-        lastDataPoint.time = lastTimestamp ? formatTimeForChart(lastTimestamp) : `${maxLength - 1}`;
-        chartData.push(lastDataPoint);
-      }
+      sampledRecords.forEach((item, i) => {
+        const timestamp = item.record.timestamp.getTime();
+        
+        if (timestamp - currentWindowStart > timeWindowMs && currentWindow.length > 0) {
+          const dataPoint = createDataPoint(currentWindow);
+          if (dataPoint) chartData.push(dataPoint);
+          currentWindow = [item];
+          currentWindowStart = timestamp;
+        } else {
+          currentWindow.push(item);
+        }
+        
+        // Handle last window
+        if (i === sampledRecords.length - 1 && currentWindow.length > 0) {
+          const dataPoint = createDataPoint(currentWindow);
+          if (dataPoint) chartData.push(dataPoint);
+        }
+      });
 
       // Calculate Y-axis domain based on actual data
       let minTemp = Infinity;
