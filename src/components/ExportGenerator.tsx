@@ -295,7 +295,7 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
     });
   };
 
-  // Render mini charts for filtered data - using ALL session data
+  // Render mini charts for filtered data - using session time range for full coverage
   const renderFilteredCharts = useCallback(async (pdf: jsPDF, yPos: number, margin: number, pageWidth: number): Promise<number> => {
     const filteredData = getFilteredChartData();
     
@@ -325,34 +325,57 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       chartContainer.style.backgroundColor = 'white';
       document.body.appendChild(chartContainer);
 
-      // Prepare chart data - merge by timestamp so every logger can render across the full session
-      // (the previous “shared index/time-window” approach could drop entire logger series)
-      const dataMap = new Map<number, any>();
+      // Use session's defined time range to ensure FULL session is shown on X-axis
+      const sessionStart = session.startTime.getTime();
+      const sessionEnd = session.endTime.getTime();
+      const sessionDuration = sessionEnd - sessionStart;
 
-      const targetPointsPerLogger = 220;
+      // Target ~180 points across the full session duration
+      const targetPoints = 180;
+      const timeStep = Math.max(1000, Math.floor(sessionDuration / targetPoints));
+
+      // Create time slots spanning the ENTIRE session
+      const dataMap = new Map<number, any>();
+      for (let t = sessionStart; t <= sessionEnd; t += timeStep) {
+        dataMap.set(t, { time: formatTimeForChart(new Date(t)) });
+      }
+      // Always include the exact session end time
+      if (!dataMap.has(sessionEnd)) {
+        dataMap.set(sessionEnd, { time: formatTimeForChart(new Date(sessionEnd)) });
+      }
+
+      // Fill temperature values from each logger using binary search for closest match
       items.forEach((item, idx) => {
         const records = item.records;
         if (!records || records.length === 0) return;
 
-        const sampleRate = Math.max(1, Math.ceil(records.length / targetPointsPerLogger));
+        const sorted = [...records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
 
-        const pushRecord = (r: any) => {
-          const t = r.timestamp?.getTime?.();
-          if (!t) return;
-
-          const existing = dataMap.get(t) || { time: formatTimeForChart(r.timestamp) };
-          existing[`temp${idx}`] = r.temperature;
-          if (r.fValue !== undefined && r.fValue !== null) {
-            existing[`fvalue${idx}`] = r.fValue;
+        dataMap.forEach((point, timestamp) => {
+          // Binary search to find closest record
+          let lo = 0, hi = sorted.length - 1;
+          while (lo < hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            if (sorted[mid].timestamp.getTime() < timestamp) lo = mid + 1;
+            else hi = mid;
           }
-          dataMap.set(t, existing);
-        };
-
-        for (let i = 0; i < records.length; i += sampleRate) {
-          pushRecord(records[i]);
-        }
-        // Always include the last record for this logger
-        pushRecord(records[records.length - 1]);
+          // Check both lo and lo-1 for closest
+          let best = lo;
+          if (lo > 0) {
+            const d1 = Math.abs(sorted[lo].timestamp.getTime() - timestamp);
+            const d2 = Math.abs(sorted[lo - 1].timestamp.getTime() - timestamp);
+            if (d2 < d1) best = lo - 1;
+          }
+          const rec = sorted[best];
+          const diff = Math.abs(rec.timestamp.getTime() - timestamp);
+          // Only use if within 3x time step
+          if (diff < timeStep * 3) {
+            point[`temp${idx}`] = rec.temperature;
+            if (rec.fValue !== undefined && rec.fValue !== null) {
+              point[`fvalue${idx}`] = rec.fValue;
+            }
+          }
+        });
       });
 
       const chartData: any[] = Array.from(dataMap.entries())

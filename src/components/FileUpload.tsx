@@ -53,7 +53,7 @@ export function FileUpload({ onFileLoad }: FileUploadProps) {
                 CSV 파일을 드래그하거나 클릭하여 업로드
               </p>
               <p className="text-sm text-muted-foreground mt-1">
-                TMI QLever 데이터로거 CSV 파일을 지원합니다
+                TMI Qlever 데이터로거 CSV 파일을 지원합니다
               </p>
             </div>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
