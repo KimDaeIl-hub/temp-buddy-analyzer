@@ -4,7 +4,7 @@ import { DataFile } from '@/types/file';
 import { MeasurementSession } from '@/types/temperature';
 
 const HISTORY_STORAGE_KEY = 'temperature-logger-history';
-const MAX_HISTORY_ITEMS = 20;
+const MAX_HISTORY_ITEMS = 30;
 
 export function useHistory() {
   const [historyItems, setHistoryItems] = useState<SessionHistory[]>([]);
@@ -43,6 +43,12 @@ export function useHistory() {
 
   // Save or update a file's session configuration
   const saveHistory = useCallback((file: DataFile, fileContent: string) => {
+    // Only save if there are configured loggers (at least one with type set)
+    const hasConfiguredLoggers = file.loggers.some(l => l.type !== null);
+    if (!hasConfiguredLoggers || file.sessions.length === 0) {
+      return;
+    }
+
     const loggerConfigs: LoggerHistoryConfig[] = file.loggers.map(logger => ({
       loggerId: logger.id,
       loggerName: logger.name,
@@ -66,9 +72,8 @@ export function useHistory() {
       
       let updated: SessionHistory[];
       if (existingIndex >= 0) {
-        // Update existing entry
-        updated = [...prev];
-        updated[existingIndex] = historyItem;
+        // Update existing entry - move to top with new timestamp
+        updated = [historyItem, ...prev.filter((_, i) => i !== existingIndex)].slice(0, MAX_HISTORY_ITEMS);
       } else {
         // Add new entry, keeping max items
         updated = [historyItem, ...prev].slice(0, MAX_HISTORY_ITEMS);
