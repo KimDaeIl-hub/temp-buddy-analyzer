@@ -23,10 +23,23 @@ const LOGGER_COLORS = [
 ];
 
 export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSession, currentFileId, viewMode }: LoggerConfigProps) {
+  // Check if a logger ID has file prefix (format: fileId-loggerId)
+  const hasFilePrefix = (loggerId: string): boolean => {
+    // File IDs typically look like "file-1234567890" so prefixed IDs look like "file-1234567890-pv123456"
+    return loggerId.startsWith('file-') && loggerId.split('-').length >= 3;
+  };
+
   // Extract file ID from prefixed logger ID for combined mode
   const extractFileId = (loggerId: string): string | undefined => {
-    if (viewMode === 'combined' && loggerId.includes('-')) {
+    if (hasFilePrefix(loggerId)) {
+      // Format: file-timestamp-originalLoggerId -> extract file-timestamp
       const parts = loggerId.split('-');
+      // Find where the logger ID starts (typically 'pv' prefix)
+      const loggerPartIndex = parts.findIndex((p, i) => i > 0 && /^pv\d+$/.test(p));
+      if (loggerPartIndex > 0) {
+        return parts.slice(0, loggerPartIndex).join('-');
+      }
+      // Fallback: assume last part is logger ID
       return parts.slice(0, -1).join('-');
     }
     return currentFileId;
@@ -34,21 +47,28 @@ export function LoggerConfig({ loggers, sessions, onUpdateLogger, onUpdateSessio
 
   // Extract original logger ID from prefixed logger ID
   const extractOriginalLoggerId = (loggerId: string): string => {
-    if (viewMode === 'combined' && loggerId.includes('-')) {
+    if (hasFilePrefix(loggerId)) {
       const parts = loggerId.split('-');
+      // Find where the logger ID starts
+      const loggerPartIndex = parts.findIndex((p, i) => i > 0 && /^pv\d+$/.test(p));
+      if (loggerPartIndex > 0) {
+        return parts.slice(loggerPartIndex).join('-');
+      }
+      // Fallback: return last part
       return parts[parts.length - 1];
     }
     return loggerId;
   };
 
   const handleLoggerUpdate = (loggerId: string, updates: Partial<DataLogger>) => {
-    const targetFileId = viewMode === 'individual' ? currentFileId : extractFileId(loggerId);
+    // Always pass currentFileId for single file scenarios
+    const targetFileId = currentFileId || extractFileId(loggerId);
     onUpdateLogger(loggerId, updates, targetFileId);
   };
 
   // Handle per-logger, per-session temperature update
   const handleLoggerSessionTempUpdate = (loggerId: string, sessionId: number, temperature: number | undefined) => {
-    const targetFileId = viewMode === 'individual' ? currentFileId : extractFileId(loggerId);
+    const targetFileId = currentFileId || extractFileId(loggerId);
     const originalLoggerId = extractOriginalLoggerId(loggerId);
     onUpdateSession(sessionId, { 
       // Update loggerSetTemperatures map
