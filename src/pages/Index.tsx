@@ -274,7 +274,7 @@ const Index = () => {
             </div>
             <div>
               <h1 className="text-lg font-bold text-foreground">온도 데이터로거 분석기</h1>
-              <p className="text-xs text-muted-foreground">TMI QLever 데이터 분석 도구</p>
+              <p className="text-xs text-muted-foreground">TMI Qlever 데이터 분석 도구</p>
             </div>
           </div>
           
@@ -309,7 +309,7 @@ const Index = () => {
                 데이터 로거 분석 시작
               </h2>
               <p className="text-muted-foreground">
-                TMI QLever에서 내보낸 CSV 파일을 업로드하여 온도 데이터를 분석하세요
+                TMI Qlever에서 내보낸 CSV 파일을 업로드하여 온도 데이터를 분석하세요
               </p>
             </div>
             
