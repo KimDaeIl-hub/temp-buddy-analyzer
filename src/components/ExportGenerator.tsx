@@ -378,36 +378,51 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         if (!records || records.length === 0) return;
 
         const sorted = [...records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+        
+        // Pre-compute last known values for the entire dataset
+        const lastKnownTemp = sorted[sorted.length - 1].temperature;
+        const lastKnownF = sorted.reduce((acc, r) => {
+          if (r.fValue !== undefined && r.fValue !== null) return r.fValue;
+          return acc;
+        }, undefined as number | undefined);
+        
         let p = 0;
-        let lastTemp: number | undefined;
-        let lastF: number | undefined;
+        let currentTemp: number | undefined;
+        let currentF: number | undefined;
+        const firstRecordTime = sorted[0].timestamp.getTime();
+        const lastRecordTime = sorted[sorted.length - 1].timestamp.getTime();
 
         sampledTimestamps.forEach((t) => {
+          // Advance pointer to find the most recent record at or before time t
           while (p < sorted.length && sorted[p].timestamp.getTime() <= t) {
-            lastTemp = sorted[p].temperature;
+            currentTemp = sorted[p].temperature;
             if (sorted[p].fValue !== undefined && sorted[p].fValue !== null) {
-              lastF = sorted[p].fValue;
+              currentF = sorted[p].fValue;
             }
             p++;
           }
 
-          // Only start drawing after first record time, but once started keep it to the end.
-          if (lastTemp !== undefined) {
-            const point = dataMap.get(t);
-            if (point) {
-              point[`temp${idx}`] = lastTemp;
-              if (lastF !== undefined) point[`fvalue${idx}`] = lastF;
+          const point = dataMap.get(t);
+          if (!point) return;
+
+          // Only start drawing after first record time
+          if (t >= firstRecordTime) {
+            // If we're past the last actual record, use the last known values
+            if (t > lastRecordTime) {
+              point[`temp${idx}`] = lastKnownTemp;
+              if (lastKnownF !== undefined) point[`fvalue${idx}`] = lastKnownF;
+            } else if (currentTemp !== undefined) {
+              point[`temp${idx}`] = currentTemp;
+              if (currentF !== undefined) point[`fvalue${idx}`] = currentF;
             }
           }
         });
 
-        // Force last known values exactly at session end (prevents truncation)
-        if (lastTemp !== undefined) {
-          const endPoint = dataMap.get(sessionEnd);
-          if (endPoint) {
-            endPoint[`temp${idx}`] = lastTemp;
-            if (lastF !== undefined) endPoint[`fvalue${idx}`] = lastF;
-          }
+        // Explicitly ensure session end point has data
+        const endPoint = dataMap.get(sessionEnd);
+        if (endPoint) {
+          endPoint[`temp${idx}`] = lastKnownTemp;
+          if (lastKnownF !== undefined) endPoint[`fvalue${idx}`] = lastKnownF;
         }
       });
 
