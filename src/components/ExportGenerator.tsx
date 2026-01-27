@@ -325,80 +325,39 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       chartContainer.style.backgroundColor = 'white';
       document.body.appendChild(chartContainer);
 
-      // Prepare chart data - use ALL records for full session visualization
-      const chartData: any[] = [];
-      
-      // Find the full time range across all loggers in this session
-      let allRecords: { record: any; loggerIdx: number }[] = [];
+      // Prepare chart data - merge by timestamp so every logger can render across the full session
+      // (the previous “shared index/time-window” approach could drop entire logger series)
+      const dataMap = new Map<number, any>();
+
+      const targetPointsPerLogger = 220;
       items.forEach((item, idx) => {
-        item.records.forEach(record => {
-          allRecords.push({ record, loggerIdx: idx });
-        });
-      });
-      
-      // Sort by timestamp
-      allRecords.sort((a, b) => a.record.timestamp.getTime() - b.record.timestamp.getTime());
-      
-      // Calculate sample rate - aim for ~150 data points for optimal visualization
-      const totalRecords = allRecords.length;
-      const targetPoints = 150;
-      const sampleRate = Math.max(1, Math.ceil(totalRecords / targetPoints));
-      
-      // Create time-based chart data by sampling the sorted records
-      const sampledRecords: typeof allRecords = [];
-      for (let i = 0; i < totalRecords; i += sampleRate) {
-        sampledRecords.push(allRecords[i]);
-      }
-      // Always include last record
-      if (totalRecords > 0 && (totalRecords - 1) % sampleRate !== 0) {
-        sampledRecords.push(allRecords[totalRecords - 1]);
-      }
-      
-      // Group sampled records by time window and create data points
-      const timeWindowMs = 1000; // 1 second window
-      let currentWindow: { record: any; loggerIdx: number }[] = [];
-      let currentWindowStart = sampledRecords[0]?.record.timestamp.getTime() || 0;
-      
-      const createDataPoint = (records: typeof currentWindow): any => {
-        if (records.length === 0) return null;
-        const dataPoint: any = { index: chartData.length };
-        
-        // Use timestamp from first record
-        const timestamp = records[0].record.timestamp;
-        dataPoint.time = formatTimeForChart(timestamp);
-        
-        // Get temperature values for each logger
-        items.forEach((item, idx) => {
-          const matchingRecord = records.find(r => r.loggerIdx === idx);
-          if (matchingRecord) {
-            dataPoint[`temp${idx}`] = matchingRecord.record.temperature;
-            if (matchingRecord.record.fValue !== undefined) {
-              dataPoint[`fvalue${idx}`] = matchingRecord.record.fValue;
-            }
+        const records = item.records;
+        if (!records || records.length === 0) return;
+
+        const sampleRate = Math.max(1, Math.ceil(records.length / targetPointsPerLogger));
+
+        const pushRecord = (r: any) => {
+          const t = r.timestamp?.getTime?.();
+          if (!t) return;
+
+          const existing = dataMap.get(t) || { time: formatTimeForChart(r.timestamp) };
+          existing[`temp${idx}`] = r.temperature;
+          if (r.fValue !== undefined && r.fValue !== null) {
+            existing[`fvalue${idx}`] = r.fValue;
           }
-        });
-        
-        return dataPoint;
-      };
-      
-      sampledRecords.forEach((item, i) => {
-        const timestamp = item.record.timestamp.getTime();
-        
-        if (timestamp - currentWindowStart > timeWindowMs && currentWindow.length > 0) {
-          const dataPoint = createDataPoint(currentWindow);
-          if (dataPoint) chartData.push(dataPoint);
-          currentWindow = [item];
-          currentWindowStart = timestamp;
-        } else {
-          currentWindow.push(item);
+          dataMap.set(t, existing);
+        };
+
+        for (let i = 0; i < records.length; i += sampleRate) {
+          pushRecord(records[i]);
         }
-        
-        // Handle last window
-        if (i === sampledRecords.length - 1 && currentWindow.length > 0) {
-          const dataPoint = createDataPoint(currentWindow);
-          if (dataPoint) chartData.push(dataPoint);
-        }
+        // Always include the last record for this logger
+        pushRecord(records[records.length - 1]);
       });
+
+      const chartData: any[] = Array.from(dataMap.entries())
+        .sort((a, b) => a[0] - b[0])
+        .map(([_, point], index) => ({ index, ...point }));
 
       // Calculate Y-axis domain based on actual data
       let minTemp = Infinity;

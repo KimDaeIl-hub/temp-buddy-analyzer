@@ -39,10 +39,6 @@ export function HistoryPanel({
     });
   };
 
-  if (historyItems.length === 0) {
-    return null;
-  }
-
   return (
     <Card className="mt-6 bg-card">
       <CardHeader className="pb-3">
@@ -77,71 +73,77 @@ export function HistoryPanel({
         </div>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="max-h-[300px]">
-          <div className="space-y-3">
-            {historyItems.map((history) => (
-              <div 
-                key={history.id} 
-                className="p-3 rounded-lg border bg-background/50 space-y-2 hover:border-primary/50 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <FileText className="w-4 h-4 text-primary shrink-0" />
-                    <span className="font-medium text-sm truncate">{history.fileName}</span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-7 w-7"
-                      onClick={() => onLoadHistory(history)}
-                      title="불러오기"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                    </Button>
-                    <Button 
-                      size="icon" 
-                      variant="ghost" 
-                      className="h-7 w-7 text-destructive hover:text-destructive"
-                      onClick={() => onDeleteHistory(history.id)}
-                      title="삭제"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    <span>{formatDate(history.savedAt)}</span>
-                  </div>
-                  <Badge variant="secondary" className="text-xs">
-                    <Layers className="w-3 h-3 mr-1" />
-                    {history.sessions.length}개 회차
-                  </Badge>
-                </div>
-                
-                <div className="flex flex-wrap gap-1">
-                  {history.loggerConfigs.filter(l => l.type).map((logger) => (
-                    <Badge 
-                      key={logger.loggerId} 
-                      variant="outline" 
-                      className="text-xs"
-                    >
-                      {logger.loggerName.length > 15 
-                        ? logger.loggerName.slice(0, 15) + '...' 
-                        : logger.loggerName}
-                      <span className="ml-1 opacity-70">
-                        ({logger.type === 'hotwater' ? '열수' : '품온'})
-                      </span>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ))}
+        {historyItems.length === 0 ? (
+          <div className="rounded-lg border bg-background/50 p-4 text-sm text-muted-foreground">
+            아직 저장된 분석 기록이 없습니다. (기록은 현재 브라우저에 저장됩니다)
           </div>
-        </ScrollArea>
+        ) : (
+          <ScrollArea className="max-h-[300px]">
+            <div className="space-y-3">
+              {historyItems.map((history) => (
+                <div 
+                  key={history.id} 
+                  className="p-3 rounded-lg border bg-background/50 space-y-2 hover:border-primary/50 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <FileText className="w-4 h-4 text-primary shrink-0" />
+                      <span className="font-medium text-sm truncate">{history.fileName}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-7 w-7"
+                        onClick={() => onLoadHistory(history)}
+                        title="불러오기"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </Button>
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => onDeleteHistory(history.id)}
+                        title="삭제"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      <span>{formatDate(history.savedAt)}</span>
+                    </div>
+                    <Badge variant="secondary" className="text-xs">
+                      <Layers className="w-3 h-3 mr-1" />
+                      {history.sessions.length}개 회차
+                    </Badge>
+                  </div>
+                  
+                  <div className="flex flex-wrap gap-1">
+                    {history.loggerConfigs.filter(l => l.type).map((logger) => (
+                      <Badge 
+                        key={logger.loggerId} 
+                        variant="outline" 
+                        className="text-xs"
+                      >
+                        {logger.loggerName.length > 15 
+                          ? logger.loggerName.slice(0, 15) + '...' 
+                          : logger.loggerName}
+                        <span className="ml-1 opacity-70">
+                          ({logger.type === 'hotwater' ? '열수' : '품온'})
+                        </span>
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+        )}
       </CardContent>
     </Card>
   );
