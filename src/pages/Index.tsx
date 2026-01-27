@@ -27,7 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp, FileDown, Calculator, FileText } from "lucide-react";
+import { Thermometer, RefreshCw, Database, BarChart3, TrendingUp, FileDown, Calculator, FileText, History, Upload } from "lucide-react";
 
 const Index = () => {
   const [files, setFiles] = useState<DataFile[]>([]);
@@ -303,7 +303,7 @@ const Index = () => {
 
       <main className="container px-4 py-6">
         {files.length === 0 ? (
-          <div className="max-w-2xl mx-auto space-y-6">
+          <div className="max-w-3xl mx-auto space-y-6">
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-2xl font-bold text-foreground">
                 데이터 로거 분석 시작
@@ -313,41 +313,58 @@ const Index = () => {
               </p>
             </div>
             
-            <MultiFileUpload files={files} onFilesChange={handleFilesChange} />
-            
-            {/* History Panel */}
-            <HistoryPanel
-              historyItems={historyItems}
-              onLoadHistory={handleLoadHistory}
-              onDeleteHistory={deleteHistory}
-              onClearHistory={clearHistory}
-            />
-            
-            <div className="grid gap-4 md:grid-cols-3 mt-8">
-              <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
-                  <TrendingUp className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-medium mb-1">다중 파일 지원</h3>
-                <p className="text-sm text-muted-foreground">여러 파일 동시 분석</p>
-              </div>
+            <Tabs defaultValue="upload" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="upload" className="gap-2">
+                  <Upload className="w-4 h-4" />
+                  새 파일 업로드
+                </TabsTrigger>
+                <TabsTrigger value="history" className="gap-2">
+                  <History className="w-4 h-4" />
+                  분석 기록 ({historyItems.length})
+                </TabsTrigger>
+              </TabsList>
               
-              <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
-                  <BarChart3 className="w-5 h-5 text-primary" />
+              <TabsContent value="upload" className="space-y-6">
+                <MultiFileUpload files={files} onFilesChange={handleFilesChange} />
+                
+                <div className="grid gap-4 md:grid-cols-3 mt-8">
+                  <div className="p-4 rounded-lg border bg-card text-center">
+                    <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                      <TrendingUp className="w-5 h-5 text-primary" />
+                    </div>
+                    <h3 className="font-medium mb-1">다중 파일 지원</h3>
+                    <p className="text-sm text-muted-foreground">여러 파일 동시 분석</p>
+                  </div>
+                  
+                  <div className="p-4 rounded-lg border bg-card text-center">
+                    <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                      <BarChart3 className="w-5 h-5 text-primary" />
+                    </div>
+                    <h3 className="font-medium mb-1">회차 분할</h3>
+                    <p className="text-sm text-muted-foreground">직관적인 구간 선택</p>
+                  </div>
+                  
+                  <div className="p-4 rounded-lg border bg-card text-center">
+                    <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
+                      <FileDown className="w-5 h-5 text-primary" />
+                    </div>
+                    <h3 className="font-medium mb-1">PDF/Excel 리포트</h3>
+                    <p className="text-sm text-muted-foreground">분석 결과 내보내기</p>
+                  </div>
                 </div>
-                <h3 className="font-medium mb-1">회차 분할</h3>
-                <p className="text-sm text-muted-foreground">직관적인 구간 선택</p>
-              </div>
+              </TabsContent>
               
-              <div className="p-4 rounded-lg border bg-card text-center">
-                <div className="p-3 rounded-full bg-primary/10 w-fit mx-auto mb-3">
-                  <FileDown className="w-5 h-5 text-primary" />
-                </div>
-                <h3 className="font-medium mb-1">PDF/Excel 리포트</h3>
-                <p className="text-sm text-muted-foreground">분석 결과 내보내기</p>
-              </div>
-            </div>
+              <TabsContent value="history">
+                <HistoryPanel
+                  historyItems={historyItems}
+                  onLoadHistory={handleLoadHistory}
+                  onDeleteHistory={deleteHistory}
+                  onClearHistory={clearHistory}
+                  expanded
+                />
+              </TabsContent>
+            </Tabs>
           </div>
         ) : (
           <div className="grid gap-6 lg:grid-cols-4">
