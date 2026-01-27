@@ -339,50 +339,27 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
       // Use session's defined time range to ensure FULL session is shown on X-axis
       const sessionStart = session.startTime.getTime();
       const sessionEnd = session.endTime.getTime();
-      const sessionDuration = Math.max(0, sessionEnd - sessionStart);
 
-      // Build a merged timeline from *all* logger records + (start/end).
-      // Then downsample while ALWAYS keeping start/end and each logger's last point.
-      const allTimestamps: number[] = [];
-      items.forEach((item) => {
-        item.records.forEach((r) => allTimestamps.push(r.timestamp.getTime()));
-      });
-      allTimestamps.push(sessionStart, sessionEnd);
-      const uniqueSorted = Array.from(new Set(allTimestamps))
-        .filter((t) => t >= sessionStart && t <= sessionEnd)
-        .sort((a, b) => a - b);
-
-      // If extremely dense, sample to target points but preserve critical timestamps.
-      const targetPoints = 220; // slightly higher to keep end segments accurate
-      const preserve = new Set<number>([sessionStart, sessionEnd]);
-      items.forEach((item) => {
-        if (item.records.length > 0) {
-          const sorted = [...item.records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
-          preserve.add(sorted[0].timestamp.getTime());
-          preserve.add(sorted[sorted.length - 1].timestamp.getTime());
-        }
-      });
-
-      let sampledTimestamps = uniqueSorted;
-      if (uniqueSorted.length > targetPoints) {
-        const step = Math.ceil(uniqueSorted.length / targetPoints);
-        sampledTimestamps = uniqueSorted.filter((t, idx) => idx % step === 0 || preserve.has(t));
-        // Ensure preserve timestamps included
-        preserve.forEach((t) => sampledTimestamps.push(t));
-        sampledTimestamps = Array.from(new Set(sampledTimestamps)).sort((a, b) => a - b);
+      // Create uniform timeline from session start to end
+      // This ensures we always have points covering the entire session
+      const numPoints = 200;
+      const timeStep = (sessionEnd - sessionStart) / (numPoints - 1);
+      const uniformTimeline: number[] = [];
+      for (let i = 0; i < numPoints; i++) {
+        uniformTimeline.push(sessionStart + i * timeStep);
+      }
+      // Always include exact session end
+      if (uniformTimeline[uniformTimeline.length - 1] !== sessionEnd) {
+        uniformTimeline.push(sessionEnd);
       }
 
-      // Create chart points
-      const dataMap = new Map<number, any>();
-      sampledTimestamps.forEach((t) => {
-        dataMap.set(t, {
-          time: formatTimeForChart(new Date(t)),
-          ts: t,
-        });
-      });
+      // Create chart points with uniform timeline
+      const chartData: any[] = uniformTimeline.map(t => ({
+        time: formatTimeForChart(new Date(t)),
+        ts: t,
+      }));
 
-      // Fill series using a forward-fill strategy so lines never "end early".
-      // For each logger, at each time point, find the most recent record value.
+      // For each logger, fill data across the entire timeline using forward-fill
       items.forEach((item, idx) => {
         const records = item.records;
         if (!records || records.length === 0) return;
@@ -390,9 +367,8 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
         // Sort records by timestamp
         const sorted = [...records].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
         
-        // Get first and last record times
+        // Get first and last data values
         const firstRecordTime = sorted[0].timestamp.getTime();
-        const lastRecordTime = sorted[sorted.length - 1].timestamp.getTime();
         const lastTemp = sorted[sorted.length - 1].temperature;
         
         // Find last F value
@@ -404,62 +380,48 @@ export function ExportGenerator({ files, analysisGroups, resultFilters, chartRef
           }
         }
 
-        // Binary search helper to find the index of the last record at or before time t
-        const findLastRecordBeforeTime = (t: number): number => {
+        // Fill each chart point
+        chartData.forEach((point) => {
+          const t = point.ts;
+          
+          // Don't draw before first record
+          if (t < firstRecordTime) return;
+
+          // Find the most recent record at or before time t using binary search
           let left = 0;
           let right = sorted.length - 1;
-          let result = -1;
+          let foundIdx = -1;
           
           while (left <= right) {
             const mid = Math.floor((left + right) / 2);
             if (sorted[mid].timestamp.getTime() <= t) {
-              result = mid;
+              foundIdx = mid;
               left = mid + 1;
             } else {
               right = mid - 1;
             }
           }
-          return result;
-        };
 
-        // Fill each time point
-        sampledTimestamps.forEach((t) => {
-          const point = dataMap.get(t);
-          if (!point) return;
-
-          // Don't draw before first record
-          if (t < firstRecordTime) return;
-
-          // If we're past or at the last record, use the last known values
-          if (t >= lastRecordTime) {
-            point[`temp${idx}`] = lastTemp;
-            if (lastFValue !== undefined) point[`fvalue${idx}`] = lastFValue;
-          } else {
-            // Find the most recent record at or before time t
-            const recordIdx = findLastRecordBeforeTime(t);
-            if (recordIdx >= 0) {
-              point[`temp${idx}`] = sorted[recordIdx].temperature;
-              
-              // Find F value from this or earlier record
-              for (let i = recordIdx; i >= 0; i--) {
-                if (sorted[i].fValue !== undefined && sorted[i].fValue !== null) {
-                  point[`fvalue${idx}`] = sorted[i].fValue;
-                  break;
-                }
+          if (foundIdx >= 0) {
+            point[`temp${idx}`] = sorted[foundIdx].temperature;
+            
+            // Find F value from this or earlier record
+            for (let i = foundIdx; i >= 0; i--) {
+              if (sorted[i].fValue !== undefined && sorted[i].fValue !== null) {
+                point[`fvalue${idx}`] = sorted[i].fValue;
+                break;
               }
             }
           }
+
+          // For points after the last record, use the last known values
+          // This ensures the line extends to session end
+          if (foundIdx === sorted.length - 1 || t > sorted[sorted.length - 1].timestamp.getTime()) {
+            point[`temp${idx}`] = lastTemp;
+            if (lastFValue !== undefined) point[`fvalue${idx}`] = lastFValue;
+          }
         });
-
-        // Explicitly ensure session end point has data (force the line to extend to session end)
-        const endPoint = dataMap.get(sessionEnd);
-        if (endPoint) {
-          endPoint[`temp${idx}`] = lastTemp;
-          if (lastFValue !== undefined) endPoint[`fvalue${idx}`] = lastFValue;
-        }
       });
-
-      const chartData: any[] = Array.from(dataMap.values()).sort((a, b) => a.ts - b.ts);
 
       const hasAnyFValue = items.some((it) => it.records.some((r) => r.fValue !== undefined && r.fValue !== null));
 
