@@ -59,15 +59,26 @@ const Index = () => {
     }
 
     // Combined mode - merge all files
+    // For single file, DON'T prefix logger IDs to simplify update handling
     const allLoggers: DataLogger[] = [];
     const allSessions: MeasurementSession[] = [];
     
+    if (files.length === 1) {
+      // Single file: use original logger IDs without prefixing
+      return { 
+        displayLoggers: files[0].loggers, 
+        displaySessions: files[0].sessions,
+        currentFile: files[0]
+      };
+    }
+    
+    // Multiple files: prefix IDs for disambiguation
     files.forEach((file, fileIndex) => {
       file.loggers.forEach(logger => {
         allLoggers.push({
           ...logger,
           id: `${file.id}-${logger.id}`,
-          name: files.length > 1 ? `[${file.name.replace('.csv', '')}] ${logger.name}` : logger.name,
+          name: `[${file.name.replace('.csv', '')}] ${logger.name}`,
         });
       });
       
@@ -75,7 +86,7 @@ const Index = () => {
         allSessions.push({
           ...session,
           id: session.id + fileIndex * 1000, // Offset to avoid ID collision
-          name: files.length > 1 ? `[${file.name.replace('.csv', '')}] ${session.name}` : session.name,
+          name: `[${file.name.replace('.csv', '')}] ${session.name}`,
         });
       });
     });
