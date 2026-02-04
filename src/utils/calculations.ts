@@ -1,5 +1,22 @@
 import { DataLogger, MeasurementSession, CalculationResult, TemperatureRecord } from "@/types/temperature";
 
+function getMeasurementIntervalSeconds(records: TemperatureRecord[]): number {
+  // Derive interval from data (median delta). Falls back to 5 seconds.
+  if (records.length < 2) return 5;
+  const deltas: number[] = [];
+  for (let i = 1; i < records.length; i++) {
+    const delta = (records[i].timestamp.getTime() - records[i - 1].timestamp.getTime()) / 1000;
+    if (Number.isFinite(delta) && delta > 0) deltas.push(delta);
+  }
+  if (deltas.length === 0) return 5;
+  deltas.sort((a, b) => a - b);
+  const mid = Math.floor(deltas.length / 2);
+  const median = deltas.length % 2 === 0 ? (deltas[mid - 1] + deltas[mid]) / 2 : deltas[mid];
+  // Most loggers are 5s/10s; round to nearest 0.5s to avoid jitter.
+  const rounded = Math.round(median * 2) / 2;
+  return rounded > 0 ? rounded : 5;
+}
+
 export function calculateHotWaterResults(
   records: TemperatureRecord[],
   setTemperature: number
@@ -13,9 +30,9 @@ export function calculateHotWaterResults(
   
   const averageTemp = qualifyingRecords.reduce((sum, r) => sum + r.temperature, 0) / qualifyingRecords.length;
   
-  // Calculate duration: qualifying record count × measurement interval (5 seconds)
+  // Calculate duration: qualifying record count × measurement interval (derived from data)
   // Then convert to minutes and round to 1 decimal place
-  const intervalSeconds = 5;
+  const intervalSeconds = getMeasurementIntervalSeconds(records);
   const durationSeconds = qualifyingRecords.length * intervalSeconds;
   const durationMinutes = Math.round((durationSeconds / 60) * 10) / 10;
   
@@ -52,9 +69,9 @@ export function calculateProductResults(
   
   const averageTemp = qualifyingRecords.reduce((sum, r) => sum + r.temperature, 0) / qualifyingRecords.length;
   
-  // Calculate duration: qualifying record count × measurement interval (5 seconds)
+  // Calculate duration: qualifying record count × measurement interval (derived from data)
   // Then convert to minutes and round to 1 decimal place
-  const intervalSeconds = 5;
+  const intervalSeconds = getMeasurementIntervalSeconds(records);
   const durationSeconds = qualifyingRecords.length * intervalSeconds;
   const durationMinutes = Math.round((durationSeconds / 60) * 10) / 10;
   
