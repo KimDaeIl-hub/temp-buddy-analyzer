@@ -13,16 +13,11 @@ export function calculateHotWaterResults(
   
   const averageTemp = qualifyingRecords.reduce((sum, r) => sum + r.temperature, 0) / qualifyingRecords.length;
   
-  // Calculate duration based on time difference
-  let durationMinutes = 0;
-  if (qualifyingRecords.length > 1) {
-    const firstTime = qualifyingRecords[0].timestamp.getTime();
-    const lastTime = qualifyingRecords[qualifyingRecords.length - 1].timestamp.getTime();
-    durationMinutes = (lastTime - firstTime) / (1000 * 60);
-  } else if (qualifyingRecords.length === 1) {
-    // Assume 5-second interval for single record
-    durationMinutes = 5 / 60;
-  }
+  // Calculate duration: qualifying record count × measurement interval (5 seconds)
+  // Then convert to minutes and round to 1 decimal place
+  const intervalSeconds = 5;
+  const durationSeconds = qualifyingRecords.length * intervalSeconds;
+  const durationMinutes = Math.round((durationSeconds / 60) * 10) / 10;
   
   return { averageTemp, durationMinutes, qualifyingRecords };
 }
@@ -57,13 +52,11 @@ export function calculateProductResults(
   
   const averageTemp = qualifyingRecords.reduce((sum, r) => sum + r.temperature, 0) / qualifyingRecords.length;
   
-  // Calculate duration
-  let durationMinutes = 0;
-  if (qualifyingRecords.length > 1) {
-    const firstTime = qualifyingRecords[0].timestamp.getTime();
-    const lastTime = qualifyingRecords[qualifyingRecords.length - 1].timestamp.getTime();
-    durationMinutes = (lastTime - firstTime) / (1000 * 60);
-  }
+  // Calculate duration: qualifying record count × measurement interval (5 seconds)
+  // Then convert to minutes and round to 1 decimal place
+  const intervalSeconds = 5;
+  const durationSeconds = qualifyingRecords.length * intervalSeconds;
+  const durationMinutes = Math.round((durationSeconds / 60) * 10) / 10;
   
   // Get F-values from records that have them
   const recordsWithFValue = records.filter(r => r.fValue !== undefined && r.fValue !== null);
@@ -90,22 +83,12 @@ export function calculateProductResults(
     : endFValue - startFValue + (recordsWithFValue.length > 0 ? recordsWithFValue[0].fValue! : 0);
   
   // Calculate F63 and F121 based on temperature thresholds
+  // Duration = record count × measurement interval (5 seconds), rounded to 1 decimal
   const f63Records = records.filter(r => r.temperature >= 63);
   const f121Records = records.filter(r => r.temperature >= 121);
   
-  let f63Minutes = 0;
-  if (f63Records.length > 1) {
-    const firstTime = f63Records[0].timestamp.getTime();
-    const lastTime = f63Records[f63Records.length - 1].timestamp.getTime();
-    f63Minutes = (lastTime - firstTime) / (1000 * 60);
-  }
-  
-  let f121Minutes = 0;
-  if (f121Records.length > 1) {
-    const firstTime = f121Records[0].timestamp.getTime();
-    const lastTime = f121Records[f121Records.length - 1].timestamp.getTime();
-    f121Minutes = (lastTime - firstTime) / (1000 * 60);
-  }
+  const f63Minutes = Math.round((f63Records.length * intervalSeconds / 60) * 10) / 10;
+  const f121Minutes = Math.round((f121Records.length * intervalSeconds / 60) * 10) / 10;
   
   return { 
     averageTemp, 
